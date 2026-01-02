@@ -32,4 +32,4 @@ Planned features:
 
 ## Structure
 
-- `/server` - The server code (Rust)
+- `/server` - The server code (Rust) (API)
