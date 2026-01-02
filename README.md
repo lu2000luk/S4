@@ -1,3 +1,3 @@
-![S4 Banner](https://github.com/lu2000luk/s4/blob/main/assets/banner.png?raw=true)
+![S4 Banner](https://raw.githubusercontent.com/lu2000luk/S4/refs/heads/master/assets/banner.png)
 
 A new, permission based, way to host your files on home servers / vps.
