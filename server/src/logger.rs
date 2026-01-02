@@ -5,9 +5,10 @@ const YELLOW: &str = "\x1b[33m";
 #[allow(dead_code)]
 const BLUE: &str = "\x1b[34m";
 const GREEN: &str = "\x1b[32m";
+const DARK_BLUE: &str = "\x1b[36m";
 
 pub fn log(message: &str) {
-    println!("{}[INFO]{} {}", GREEN, RESET, message);
+    println!("{}[INFO]{} {}", DARK_BLUE, RESET, message);
 }
 
 #[allow(dead_code)]

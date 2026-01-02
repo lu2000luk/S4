@@ -1,0 +1,57 @@
+TABLE users
+isEveryone boolean
+id string
+username string
+password_hash string
+permission relation to permissions
+created_by relation to users (optional)
+
+TABLE backups
+id string
+path string
+size int
+created_at timestamp
+created_by relation to users
+file relation to files
+
+TABLE files
+path string
+metadata json (optional, default = {})
+type "file" | "folder" | "link"
+mime_type string
+size int
+link "http" | "local" | "base64_data_url" | "ftp" | "git" (optional)
+link_target string (optional) (can be deserialized json)
+
+TABLE permissions
+weight int
+isRoot boolean
+create_api_key boolean
+create_user boolean
+delete_user boolean
+edit_user boolean
+view_user boolean
+bypass_weight boolean
+max_action_size int
+max_backup_size int
+total_storage_size int
+max_create_users int
+convert_file boolean
+file_perms {
+    "path" {
+        bypass_weight boolean
+        recursive boolean
+        read boolean
+        delete boolean
+        write boolean
+        create {
+            file boolean
+            folder boolean
+            link boolean
+            backup boolean
+            with_weight boolean
+        }
+        generate_link boolean
+        encrypt boolean
+    }
+}

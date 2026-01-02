@@ -21,7 +21,7 @@ pub async fn config() -> Config {
         Config {
             host: Some("127.0.0.1".to_string()),
             port: Some(8080),
-            mount: Some("./files/".to_string()),
+            mount: Some("./data/".to_string()),
         }
     })
 }
