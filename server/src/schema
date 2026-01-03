@@ -22,6 +22,11 @@ mime_type string
 size int
 link "http" | "local" | "base64_data_url" | "ftp" | "git" (optional)
 link_target string (optional) (can be deserialized json)
+sync {
+    sync_on "view" | "manual" | "interval"
+    sync_interval int (ms)
+    last_synced timestamp (optional)
+}
 
 TABLE permissions
 weight int
