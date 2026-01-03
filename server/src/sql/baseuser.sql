@@ -48,7 +48,7 @@ INSERT INTO users (
 SELECT
     'admin',
     'admin',
-    '$2a$12$fP/xIkUkmnqGQ80at7cLcOvPnNuuUsnB1bCzGYlc6MNTTHY.M7aE.', -- Bcrypt 12 for "admin"
+    '$2a$12$rsxkLXyNumuq0Ayexyu6LOVEOgrtAb1R98ptNCj9055JWEJ2SGdGy', -- Bcrypt 12 for "admin"
     FALSE,
     'admin',
     NULL
