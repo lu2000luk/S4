@@ -1,3 +1,4 @@
+BEGIN;
 INSERT INTO permissions (
     id,
     weight,
@@ -14,7 +15,8 @@ INSERT INTO permissions (
     max_create_users,
     convert_file,
     file_perms
-) VALUES (
+)
+SELECT
     'admin',
     100000,
     TRUE,
@@ -30,6 +32,8 @@ INSERT INTO permissions (
     9223372036854775807,
     TRUE,
     '{"/": {"bypass_weight": true, "recursive": true, "read": true, "delete": true, "write": true, "create": {"file": true, "folder": true, "link": true, "backup": true, "with_weight": true}, "generate_link": true, "encrypt": true}}'
+WHERE NOT EXISTS (
+    SELECT 1 FROM permissions WHERE id = 'admin'
 );
 
 -- Insert base admin user
@@ -40,13 +44,16 @@ INSERT INTO users (
     is_everyone,
     permission_id,
     created_by_id
-) VALUES (
+)
+SELECT
     'admin',
     'admin',
-    '%hash%',
+    '$2a$12$fP/xIkUkmnqGQ80at7cLcOvPnNuuUsnB1bCzGYlc6MNTTHY.M7aE.', -- Bcrypt 12 for "admin"
     FALSE,
     'admin',
     NULL
+WHERE NOT EXISTS (
+    SELECT 1 FROM users WHERE id = 'admin'
 );
 
 -- Insert everyone permission
@@ -66,7 +73,8 @@ INSERT INTO permissions (
     max_create_users,
     convert_file,
     file_perms
-) VALUES (
+)
+SELECT
     'everyone',
     0,
     FALSE,
@@ -82,6 +90,8 @@ INSERT INTO permissions (
     0,
     FALSE,
     '{}'
+WHERE NOT EXISTS (
+    SELECT 1 FROM permissions WHERE id = 'everyone'
 );
 
 -- Insert everyone user
@@ -92,11 +102,16 @@ INSERT INTO users (
     is_everyone,
     permission_id,
     created_by_id
-) VALUES (
+)
+SELECT
     'everyone',
     'everyone',
     '',
     TRUE,
     'everyone',
     'admin'
+WHERE NOT EXISTS (
+    SELECT 1 FROM users WHERE id = 'everyone'
 );
+
+COMMIT;

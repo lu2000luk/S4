@@ -33,3 +33,8 @@ Planned features:
 ## Structure
 
 - `/server` - The server code (Rust) (API)
+
+## Technical stuff
+
+- Database: DuckDB
+- Password hashing: Bcrypt 12 rounds

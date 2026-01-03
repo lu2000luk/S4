@@ -1,4 +1,5 @@
 use crate::logger::{log, success};
+use duckdb::Connection;
 use rocket::response::Redirect;
 use std::fs;
 use std::path::Path;
@@ -23,6 +24,11 @@ fn redir_api() -> Redirect {
     Redirect::to(uri!("/api/"))
 }
 
+#[get("/<_all>")]
+fn redir_api_all(_all: String) -> Redirect {
+    Redirect::to(uri!("/api/"))
+}
+
 #[tokio::main]
 async fn main() {
     log("Loading config...");
@@ -39,17 +45,44 @@ async fn main() {
                 .merge(("address", config_ref.host.clone())),
         )
         .mount("/api", routes![version])
-        .mount("/", routes![redir_api]);
+        .mount("/", routes![redir_api, redir_api_all]);
+    db_integrity(config_ref.mount.clone().unwrap()).await;
     log("Starting server...");
     api.launch().await.unwrap();
     success(
         format!(
             "Server started at http://{:?}:{:?}",
-            config_ref.host.clone(),
-            config_ref.port.clone()
+            config_ref.host.clone().unwrap(),
+            config_ref.port.clone().unwrap()
         )
         .as_str(),
     );
+}
+
+pub async fn db_integrity(mount: String) {
+    let db_path = format!("{}/{}", mount, "s4.db");
+    log("Connecting to DB for checks...");
+    let db_config = duckdb::Config::default()
+        .access_mode(duckdb::AccessMode::ReadWrite)
+        .unwrap();
+    let conn = Connection::open_with_flags(db_path, db_config).unwrap();
+    log("Running DB schema checks...");
+    let schema = include_str!("./sql/schema.sql");
+    conn.execute_batch(schema).unwrap();
+    log("Checking system users existance...");
+    let mut stmt = conn
+        .prepare("SELECT COUNT(*) FROM users WHERE id IN ('admin','everyone')")
+        .unwrap();
+    let existing: i64 = stmt.query_row([], |row| row.get(0)).unwrap();
+
+    if existing < 2 {
+        log("Missing system users detected, inserting...");
+        let baseusers = include_str!("./sql/baseuser.sql");
+        conn.execute_batch(baseusers).unwrap();
+        success("System users inserted successfully.");
+    }
+
+    success("Database integrity check completed.");
 }
 
 pub fn create_path_recursive(relative_path_to_exec: Option<String>) {

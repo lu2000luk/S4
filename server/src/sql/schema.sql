@@ -1,17 +1,6 @@
--- Users table
-CREATE TABLE IF NOT EXISTS users (
-    id VARCHAR PRIMARY KEY,
-    username VARCHAR NOT NULL UNIQUE,
-    password_hash VARCHAR NOT NULL,
-    is_everyone BOOLEAN NOT NULL DEFAULT FALSE,
-    permission_id VARCHAR NOT NULL,
-    created_by_id VARCHAR,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (permission_id) REFERENCES permissions(id),
-    FOREIGN KEY (created_by_id) REFERENCES users(id)
-);
+BEGIN;
 
--- Permissions table
+-- PERMISSIONS
 CREATE TABLE IF NOT EXISTS permissions (
     id VARCHAR PRIMARY KEY,
     weight INTEGER NOT NULL,
@@ -31,7 +20,20 @@ CREATE TABLE IF NOT EXISTS permissions (
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Files table
+-- USERS
+CREATE TABLE IF NOT EXISTS users (
+    id VARCHAR PRIMARY KEY,
+    username VARCHAR NOT NULL UNIQUE,
+    password_hash VARCHAR NOT NULL,
+    is_everyone BOOLEAN NOT NULL DEFAULT FALSE,
+    permission_id VARCHAR NOT NULL,
+    created_by_id VARCHAR,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (permission_id) REFERENCES permissions(id),
+    FOREIGN KEY (created_by_id) REFERENCES users(id)
+);
+
+-- FILES
 CREATE TABLE IF NOT EXISTS files (
     id VARCHAR PRIMARY KEY,
     path VARCHAR NOT NULL UNIQUE,
@@ -48,7 +50,7 @@ CREATE TABLE IF NOT EXISTS files (
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
--- Backups table
+-- BACKUPS
 CREATE TABLE IF NOT EXISTS backups (
     id VARCHAR PRIMARY KEY,
     path VARCHAR NOT NULL,
@@ -60,10 +62,12 @@ CREATE TABLE IF NOT EXISTS backups (
     FOREIGN KEY (file_id) REFERENCES files(id)
 );
 
--- Create indexes for better query performance
+-- INDEXES
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_permission_id ON users(permission_id);
 CREATE INDEX IF NOT EXISTS idx_users_created_by_id ON users(created_by_id);
 CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
 CREATE INDEX IF NOT EXISTS idx_backups_created_by_id ON backups(created_by_id);
 CREATE INDEX IF NOT EXISTS idx_backups_file_id ON backups(file_id);
+
+COMMIT;
