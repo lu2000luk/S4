@@ -1,0 +1,29 @@
+INSERT INTO files (
+    id,
+    path,
+    metadata,
+    type,
+    mime_type,
+    size,
+    link,
+    link_target,
+    sync_on,
+    sync_interval,
+    last_synced,
+    created_at,
+    updated_at
+) VALUES (
+    'root',
+    '/',
+    '{}',
+    'folder',
+    NULL,
+    0,
+    'local',
+    '/',
+    'manual',
+    NULL,
+    NULL,
+    CURRENT_TIMESTAMP,
+    CURRENT_TIMESTAMP
+);

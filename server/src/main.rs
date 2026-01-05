@@ -49,14 +49,6 @@ async fn main() {
     db_integrity(config_ref.mount.clone().unwrap()).await;
     log("Starting server...");
     api.launch().await.unwrap();
-    success(
-        format!(
-            "Server started at http://{:?}:{:?}",
-            config_ref.host.clone().unwrap(),
-            config_ref.port.clone().unwrap()
-        )
-        .as_str(),
-    );
 }
 
 pub async fn db_integrity(mount: String) {
@@ -80,6 +72,18 @@ pub async fn db_integrity(mount: String) {
         let baseusers = include_str!("./sql/baseuser.sql");
         conn.execute_batch(baseusers).unwrap();
         success("System users inserted successfully.");
+    }
+    
+    log("Checking root file existance...");
+    let mut stmt = conn
+        .prepare("SELECT COUNT(*) FROM files WHERE id = 'root'")
+        .unwrap();
+    let existing_root: i64 = stmt.query_row([], |row| row.get(0)).unwrap();
+    if existing_root < 1 {
+        log("Missing root file detected, inserting...");
+        let rootfile = include_str!("./sql/root.sql");
+        conn.execute_batch(rootfile).unwrap();
+        success("Root file inserted successfully.");
     }
 
     success("Database integrity check completed.");

@@ -1,14 +1,12 @@
 const RESET: &str = "\x1b[0m";
-#[allow(dead_code)]
 const RED: &str = "\x1b[31m";
 const YELLOW: &str = "\x1b[33m";
-#[allow(dead_code)]
 const BLUE: &str = "\x1b[34m";
 const GREEN: &str = "\x1b[32m";
-const DARK_BLUE: &str = "\x1b[36m";
+const LIGHT_BLUE: &str = "\x1b[36m";
 
 pub fn log(message: &str) {
-    println!("{}[INFO]{} {}", DARK_BLUE, RESET, message);
+    println!("{}[INFO]{} {}", LIGHT_BLUE, RESET, message);
 }
 
 #[allow(dead_code)]
