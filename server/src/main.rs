@@ -1,5 +1,6 @@
 use crate::logger::{log, success};
-use duckdb::Connection;
+use duckdb::DuckdbConnectionManager;
+use r2d2::Pool;
 use rocket::response::Redirect;
 use std::fs;
 use std::path::Path;
@@ -8,8 +9,12 @@ use std::sync::{Arc, LazyLock, Mutex};
 #[macro_use]
 extern crate rocket;
 
+mod api;
 mod config;
 mod logger;
+mod utils;
+
+pub type DbPool = Pool<DuckdbConnectionManager>;
 
 static CONFIG: LazyLock<Arc<Mutex<Option<config::Config>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
@@ -29,6 +34,14 @@ fn redir_api_all(_all: String) -> Redirect {
     Redirect::to(uri!("/api/"))
 }
 
+fn create_db_pool(db_path: &str) -> DbPool {
+    let manager = DuckdbConnectionManager::file(db_path).unwrap();
+    Pool::builder()
+        .max_size(10)
+        .build(manager)
+        .expect("Failed to create database connection pool")
+}
+
 #[tokio::main]
 async fn main() {
     log("Loading config...");
@@ -37,30 +50,41 @@ async fn main() {
     let config_ref = config.as_ref().unwrap();
     log("Preparing folders...");
     create_path_recursive(Option::from(config_ref.mount.clone().unwrap()));
+
+    let mount = config_ref.mount.clone().unwrap();
+    let port = config_ref.port.clone();
+    let host = config_ref.host.clone();
+    drop(config);
+
+    log("Creating database connection pool...");
+    let db_path = format!("{}/{}", mount, "s4.db");
+    let pool = create_db_pool(&db_path);
+
+    db_integrity(&pool).await;
+
     log("Building server...");
     let api = rocket::build()
         .configure(
             rocket::Config::figment()
-                .merge(("port", config_ref.port.clone()))
-                .merge(("address", config_ref.host.clone())),
+                .merge(("port", port))
+                .merge(("address", host)),
         )
-        .mount("/api", routes![version])
+        .manage(pool)
+        .mount("/api", routes![version, api::userkey::generate_user_key])
         .mount("/", routes![redir_api, redir_api_all]);
-    db_integrity(config_ref.mount.clone().unwrap()).await;
+
     log("Starting server...");
     api.launch().await.unwrap();
 }
 
-pub async fn db_integrity(mount: String) {
-    let db_path = format!("{}/{}", mount, "s4.db");
+pub async fn db_integrity(pool: &DbPool) {
     log("Connecting to DB for checks...");
-    let db_config = duckdb::Config::default()
-        .access_mode(duckdb::AccessMode::ReadWrite)
-        .unwrap();
-    let conn = Connection::open_with_flags(db_path, db_config).unwrap();
+    let conn = pool.get().expect("Failed to get connection from pool");
+
     log("Running DB schema checks...");
     let schema = include_str!("./sql/schema.sql");
     conn.execute_batch(schema).unwrap();
+
     log("Checking system users existance...");
     let mut stmt = conn
         .prepare("SELECT COUNT(*) FROM users WHERE id IN ('admin','everyone')")
@@ -73,7 +97,7 @@ pub async fn db_integrity(mount: String) {
         conn.execute_batch(baseusers).unwrap();
         success("System users inserted successfully.");
     }
-    
+
     log("Checking root file existance...");
     let mut stmt = conn
         .prepare("SELECT COUNT(*) FROM files WHERE id = 'root'")

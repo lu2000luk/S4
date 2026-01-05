@@ -60,3 +60,10 @@ file_perms {
         encrypt boolean
     }
 }
+
+TABLE keys
+id string
+key string
+created_at timestamp
+owner relation to users
+permission relation to permissions
