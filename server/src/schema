@@ -42,24 +42,23 @@ max_backup_size int
 total_storage_size int
 max_create_users int
 convert_file boolean
-file_perms {
-    "path" {
-        bypass_weight boolean
-        recursive boolean
-        read boolean
-        delete boolean
-        write boolean
-        create {
-            file boolean
-            folder boolean
-            link boolean
-            backup boolean
-            with_weight boolean
-        }
-        generate_link boolean
-        encrypt boolean
-    }
-}
+
+TABLE file_perms
+id string
+permission relation to permissions
+path string
+bypass_weight boolean
+recursive boolean
+read boolean
+delete boolean
+write boolean
+create_file boolean
+create_folder boolean
+create_link boolean
+create_backup boolean
+create_with_weight boolean
+generate_link boolean
+encrypt boolean
 
 TABLE keys
 id string

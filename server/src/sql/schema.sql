@@ -16,8 +16,28 @@ CREATE TABLE IF NOT EXISTS permissions (
     total_storage_size INT8,
     max_create_users INT8,
     convert_file BOOLEAN NOT NULL DEFAULT FALSE,
-    file_perms JSON,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- FILE_PERMS
+CREATE TABLE IF NOT EXISTS file_perms (
+    id VARCHAR PRIMARY KEY,
+    permission_id VARCHAR NOT NULL,
+    path VARCHAR NOT NULL,
+    bypass_weight BOOLEAN NOT NULL DEFAULT FALSE,
+    recursive BOOLEAN NOT NULL DEFAULT FALSE,
+    read BOOLEAN NOT NULL DEFAULT FALSE,
+    delete BOOLEAN NOT NULL DEFAULT FALSE,
+    write BOOLEAN NOT NULL DEFAULT FALSE,
+    create_file BOOLEAN NOT NULL DEFAULT FALSE,
+    create_folder BOOLEAN NOT NULL DEFAULT FALSE,
+    create_link BOOLEAN NOT NULL DEFAULT FALSE,
+    create_backup BOOLEAN NOT NULL DEFAULT FALSE,
+    create_with_weight BOOLEAN NOT NULL DEFAULT FALSE,
+    generate_link BOOLEAN NOT NULL DEFAULT FALSE,
+    encrypt BOOLEAN NOT NULL DEFAULT FALSE,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (permission_id) REFERENCES permissions(id)
 );
 
 -- USERS
@@ -81,5 +101,7 @@ CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
 CREATE INDEX IF NOT EXISTS idx_backups_created_by_id ON backups(created_by_id);
 CREATE INDEX IF NOT EXISTS idx_backups_file_id ON backups(file_id);
 CREATE INDEX IF NOT EXISTS idx_keys_key ON keys(key);
+CREATE INDEX IF NOT EXISTS idx_file_perms_permission_id ON file_perms(permission_id);
+CREATE INDEX IF NOT EXISTS idx_file_perms_path ON file_perms(path);
 
 COMMIT;

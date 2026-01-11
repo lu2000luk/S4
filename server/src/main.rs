@@ -70,7 +70,15 @@ async fn main() {
                 .merge(("address", host)),
         )
         .manage(pool)
-        .mount("/api", routes![version, api::userkey::generate_user_key])
+        .mount(
+            "/api",
+            routes![
+                version,
+                api::user_key::generate_user_key,
+                api::user_key::user_key_get,
+                api::user_key::user_key_delete
+            ],
+        )
         .mount("/", routes![redir_api, redir_api_all]);
 
     log("Starting server...");

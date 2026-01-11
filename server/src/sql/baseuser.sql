@@ -13,8 +13,7 @@ INSERT INTO permissions (
     max_backup_size,
     total_storage_size,
     max_create_users,
-    convert_file,
-    file_perms
+    convert_file
 )
 SELECT
     'admin',
@@ -30,10 +29,47 @@ SELECT
     9223372036854775807,
     9223372036854775807,
     9223372036854775807,
-    TRUE,
-    '{"/": {"bypass_weight": true, "recursive": true, "read": true, "delete": true, "write": true, "create": {"file": true, "folder": true, "link": true, "backup": true, "with_weight": true}, "generate_link": true, "encrypt": true}}'
+    TRUE
 WHERE NOT EXISTS (
     SELECT 1 FROM permissions WHERE id = 'admin'
+);
+
+-- Insert admin file permissions for root path
+INSERT INTO file_perms (
+    id,
+    permission_id,
+    path,
+    bypass_weight,
+    recursive,
+    read,
+    delete,
+    write,
+    create_file,
+    create_folder,
+    create_link,
+    create_backup,
+    create_with_weight,
+    generate_link,
+    encrypt
+)
+SELECT
+    'admin_root',
+    'admin',
+    '/',
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE,
+    TRUE
+WHERE NOT EXISTS (
+    SELECT 1 FROM file_perms WHERE id = 'admin_root'
 );
 
 -- Insert base admin user
@@ -71,8 +107,7 @@ INSERT INTO permissions (
     max_backup_size,
     total_storage_size,
     max_create_users,
-    convert_file,
-    file_perms
+    convert_file
 )
 SELECT
     'everyone',
@@ -88,8 +123,7 @@ SELECT
     0,
     0,
     0,
-    FALSE,
-    '{}'
+    FALSE
 WHERE NOT EXISTS (
     SELECT 1 FROM permissions WHERE id = 'everyone'
 );

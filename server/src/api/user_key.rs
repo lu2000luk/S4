@@ -110,3 +110,103 @@ pub async fn generate_user_key(
 
     Ok(new_key)
 }
+
+#[rocket::get("/user_key?<user_id>&<password>")]
+pub async fn user_key_get(
+    user_id: String,
+    password: String,
+    pool: &State<DbPool>,
+) -> Result<String, status::Custom<String>> {
+    let data = Json(Data { user_id, password });
+    generate_user_key(data, pool).await
+}
+
+#[rocket::delete("/user_key?<user_id>&<password>")]
+pub async fn user_key_delete(
+    user_id: String,
+    password: String,
+    pool: &State<DbPool>,
+) -> Result<String, status::Custom<String>> {
+    if user_id.is_empty() || password.is_empty() {
+        return Err(status::Custom(
+            Status::BadRequest,
+            "ERROR Invalid data".to_string(),
+        ));
+    }
+
+    if user_id == "everyone" {
+        return Err(status::Custom(
+            Status::BadRequest,
+            "ERROR User cannot be everyone".to_string(),
+        ));
+    }
+
+    let conn = pool.get().map_err(|_| {
+        status::Custom(
+            Status::InternalServerError,
+            "ERROR Failed to get connection from pool".to_string(),
+        )
+    })?;
+
+    let passwd = conn
+        .query_row(
+            "SELECT password_hash FROM users WHERE id = ?",
+            duckdb::params![user_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .unwrap_or(None)
+        .unwrap_or_default();
+
+    if passwd.is_empty() {
+        return Err(status::Custom(
+            Status::Unauthorized,
+            "ERROR Authentication failed [err: targetUserNoPasswordHash]".to_string(),
+        ));
+    }
+
+    if !bcrypt::verify(&password, &passwd).unwrap_or(false) {
+        return Err(status::Custom(
+            Status::Unauthorized,
+            "ERROR Authentication failed [err: passwordMismatch]".to_string(),
+        ));
+    }
+
+    let user_key_id = format!("user_{}", user_id);
+
+    let existing_key = conn
+        .query_row(
+            "SELECT key FROM keys WHERE id = ?",
+            duckdb::params![user_key_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .unwrap_or(None)
+        .unwrap_or_default();
+
+    if existing_key.is_empty() {
+        return Err(status::Custom(
+            Status::BadRequest,
+            "ERROR No key to delete".to_string(),
+        ));
+    }
+
+    let del_res = conn
+        .execute(
+            "DELETE FROM keys WHERE id = ?",
+            duckdb::params![user_key_id],
+        )
+        .map_err(|_| {
+            status::Custom(
+                Status::InternalServerError,
+                "ERROR Failed to delete key".to_string(),
+            )
+        })?;
+
+    if del_res == 0 {
+        return Err(status::Custom(
+            Status::InternalServerError,
+            "ERROR Failed to delete key".to_string(),
+        ));
+    }
+
+    Ok("SUCCESS Key deleted".to_string())
+}
