@@ -121,8 +121,7 @@ pub async fn user_key_get(
     generate_user_key(data, pool).await
 }
 
-#[rocket::delete("/user_key?<user_id>&<password>")]
-pub async fn user_key_delete(
+async fn delete_user_key_impl(
     user_id: String,
     password: String,
     pool: &State<DbPool>,
@@ -209,4 +208,21 @@ pub async fn user_key_delete(
     }
 
     Ok("SUCCESS Key deleted".to_string())
+}
+
+#[rocket::delete("/user_key?<user_id>&<password>")]
+pub async fn user_key_delete(
+    user_id: String,
+    password: String,
+    pool: &State<DbPool>,
+) -> Result<String, status::Custom<String>> {
+    delete_user_key_impl(user_id, password, pool).await
+}
+
+#[rocket::delete("/user_key", format = "json", data = "<data>", rank = 2)]
+pub async fn user_key_delete_body(
+    data: Json<Data>,
+    pool: &State<DbPool>,
+) -> Result<String, status::Custom<String>> {
+    delete_user_key_impl(data.user_id.clone(), data.password.clone(), pool).await
 }

@@ -76,7 +76,8 @@ async fn main() {
                 version,
                 api::user_key::generate_user_key,
                 api::user_key::user_key_get,
-                api::user_key::user_key_delete
+                api::user_key::user_key_delete,
+                api::user_key::user_key_delete_body
             ],
         )
         .mount("/", routes![redir_api, redir_api_all]);
