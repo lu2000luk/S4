@@ -4,7 +4,6 @@ use crate::utils::permissions::perms_from_key;
 use rocket::State;
 use rocket::http::CookieJar;
 use rocket::http::Status;
-use rocket::request::{FromRequest, Outcome, Request};
 use rocket::response::status;
 use rocket::serde::{Deserialize, json::Json};
 
@@ -44,7 +43,6 @@ pub async fn check_auth(
     cookies: &CookieJar<'_>,
     pool: &State<DbPool>,
 ) -> Result<String, status::Custom<String>> {
-    // Priority: query param > header > cookie
     let resolved_key = key
         .or(auth_header.0)
         .or_else(|| cookies.get("key").map(|c| c.value().to_string()))
