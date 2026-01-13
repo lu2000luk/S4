@@ -93,6 +93,20 @@ CREATE TABLE IF NOT EXISTS keys (
     FOREIGN KEY (permission_id) REFERENCES permissions(id)
 );
 
+-- LINKS
+CREATE TABLE IF NOT EXISTS links (
+    id VARCHAR PRIMARY KEY,
+    file_id VARCHAR NOT NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMP,
+    access_count INTEGER NOT NULL DEFAULT 0,
+    max_access_count INTEGER,
+    created_by_id VARCHAR NOT NULL,
+    password_hash VARCHAR,
+    FOREIGN KEY (file_id) REFERENCES files(id),
+    FOREIGN KEY (created_by_id) REFERENCES users(id)
+);
+
 -- INDEXES
 CREATE INDEX IF NOT EXISTS idx_users_username ON users(username);
 CREATE INDEX IF NOT EXISTS idx_users_permission_id ON users(permission_id);
@@ -103,5 +117,7 @@ CREATE INDEX IF NOT EXISTS idx_backups_file_id ON backups(file_id);
 CREATE INDEX IF NOT EXISTS idx_keys_key ON keys(key);
 CREATE INDEX IF NOT EXISTS idx_file_perms_permission_id ON file_perms(permission_id);
 CREATE INDEX IF NOT EXISTS idx_file_perms_path ON file_perms(path);
+CREATE INDEX IF NOT EXISTS idx_links_file_id ON links(file_id);
+CREATE INDEX IF NOT EXISTS idx_links_created_by_id ON links(created_by_id);
 
 COMMIT;

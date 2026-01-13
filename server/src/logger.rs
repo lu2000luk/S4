@@ -26,3 +26,8 @@ pub fn debug(message: &str) {
 pub fn success(message: &str) {
     println!("{}[SUCCESS]{} {}", GREEN, RESET, message);
 }
+
+pub fn ascii() {
+    let a = include_str!("./utils/ascii.txt");
+    println!("{}", a);
+}

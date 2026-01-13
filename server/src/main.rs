@@ -1,4 +1,6 @@
-use crate::logger::{log, success};
+pub use s4_macros as authenticated;
+
+use crate::logger::{ascii, log, success};
 use duckdb::DuckdbConnectionManager;
 use r2d2::Pool;
 use rocket::response::Redirect;
@@ -85,6 +87,8 @@ async fn main() {
         .mount("/", routes![redir_api, redir_api_all]);
 
     log("Starting server...");
+    println!("");
+    ascii();
     api.launch().await.unwrap();
 }
 

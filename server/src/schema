@@ -66,3 +66,13 @@ key string
 created_at timestamp
 owner relation to users
 permission relation to permissions
+
+TABLE links
+id string
+file relation to files
+created_at timestamp
+expires_at timestamp (optional)
+access_count int
+max_access_count int (optional)
+created_by relation to users
+password_hash string (optional)

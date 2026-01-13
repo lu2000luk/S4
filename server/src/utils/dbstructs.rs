@@ -83,3 +83,15 @@ pub struct Key {
     pub owner_id: String,
     pub permission_id: String,
 }
+
+#[derive(Debug, Clone)]
+pub struct Link {
+    pub id: String,
+    pub file_id: String,
+    pub created_at: chrono::NaiveDateTime,
+    pub expires_at: Option<chrono::NaiveDateTime>,
+    pub access_count: i32,
+    pub max_access_count: Option<i32>,
+    pub created_by_id: String,
+    pub password_hash: Option<String>,
+}
