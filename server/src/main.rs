@@ -81,7 +81,8 @@ async fn main() {
                 api::user_key::user_key_delete,
                 api::user_key::user_key_delete_body,
                 api::check_auth::check_auth,
-                api::check_auth::check_auth_post
+                api::check_auth::check_auth_post,
+                api::file::get::get_file
             ],
         )
         .mount("/", routes![redir_api, redir_api_all]);

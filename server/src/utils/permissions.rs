@@ -377,6 +377,11 @@ impl PermissionEngine {
         FilePermissionEngine::new(file_perms, path.to_string())
     }
 
+    pub fn get_file_perms_sync(&self, conn: &DBConn, path: &str) -> FilePermissionEngine {
+        let file_perms = fetch_file_perms_recursive(conn, &self.permissions.id, path);
+        FilePermissionEngine::new(file_perms, path.to_string())
+    }
+
     pub async fn has_file_perm(&self, conn: &DBConn, file_perm: &FilePermission) -> bool {
         if self.permissions.is_root {
             return true;
@@ -971,7 +976,7 @@ pub fn new_engine(id: String, weight: i32) -> PermissionEngine {
     })
 }
 
-pub async fn perms_from_key(conn: DBConn, key: String) -> Option<Permissions> {
+pub fn perms_from_key_sync(conn: &DBConn, key: String) -> Option<Permissions> {
     let permission_id: Option<String> = conn
         .query_row(
             "SELECT permission_id FROM keys WHERE key = ?",
@@ -1008,8 +1013,16 @@ pub async fn perms_from_key(conn: DBConn, key: String) -> Option<Permissions> {
     .ok()
 }
 
-pub async fn engine_from_key(conn: DBConn, key: String) -> Option<PermissionEngine> {
-    perms_from_key(conn, key).await.map(PermissionEngine::new)
+pub async fn perms_from_key(conn: &DBConn, key: String) -> Option<Permissions> {
+    perms_from_key_sync(conn, key)
+}
+
+pub fn engine_from_key_sync(conn: &DBConn, key: String) -> Option<PermissionEngine> {
+    perms_from_key_sync(&conn, key).map(PermissionEngine::new)
+}
+
+pub async fn engine_from_key(conn: &DBConn, key: String) -> Option<PermissionEngine> {
+    perms_from_key_sync(&conn, key).map(PermissionEngine::new)
 }
 
 pub async fn load_permission(conn: &DBConn, permission_id: &str) -> Option<Permissions> {
@@ -1043,6 +1056,37 @@ pub async fn load_engine(conn: &DBConn, permission_id: &str) -> Option<Permissio
     load_permission(conn, permission_id)
         .await
         .map(PermissionEngine::new)
+}
+
+pub fn load_permission_sync(conn: &DBConn, permission_id: &str) -> Option<Permissions> {
+    conn.query_row(
+        "SELECT id, weight, is_root, create_api_key, create_user, delete_user, edit_user, view_user, bypass_weight, max_action_size, max_backup_size, total_storage_size, max_create_users, convert_file, created_at FROM permissions WHERE id = ?",
+        duckdb::params![permission_id],
+        |row| {
+            Ok(Permissions {
+                id: row.get(0)?,
+                weight: row.get(1)?,
+                is_root: row.get(2)?,
+                create_api_key: row.get(3)?,
+                create_user: row.get(4)?,
+                delete_user: row.get(5)?,
+                edit_user: row.get(6)?,
+                view_user: row.get(7)?,
+                bypass_weight: row.get(8)?,
+                max_action_size: row.get(9)?,
+                max_backup_size: row.get(10)?,
+                total_storage_size: row.get(11)?,
+                max_create_users: row.get(12)?,
+                convert_file: row.get(13)?,
+                created_at: row.get(14)?,
+            })
+        },
+    )
+    .ok()
+}
+
+pub fn load_engine_sync(conn: &DBConn, permission_id: &str) -> Option<PermissionEngine> {
+    load_permission_sync(conn, permission_id).map(PermissionEngine::new)
 }
 
 pub async fn engine_from_id(conn: &DBConn, permission_id: &str) -> Option<PermissionEngine> {
@@ -1292,7 +1336,7 @@ mod tests {
     fn test_storage_with_occupied() {
         let perms = mock_permissions(false, 50);
         let engine = to_engine(perms);
-        
+
         assert!(engine.can_storage_size_with_occupied(1000, 5000));
         assert!(engine.can_storage_size_with_occupied(5000, 5000));
         assert!(!engine.can_storage_size_with_occupied(6000, 5000));

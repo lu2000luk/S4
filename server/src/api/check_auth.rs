@@ -1,6 +1,6 @@
 use crate::DbPool;
 use crate::utils::complex::AuthHeader;
-use crate::utils::permissions::perms_from_key;
+use crate::utils::permissions::perms_from_key_sync;
 use rocket::State;
 use rocket::http::CookieJar;
 use rocket::http::Status;
@@ -12,10 +12,7 @@ pub struct CheckAuthData {
     key: String,
 }
 
-async fn check_auth_internal(
-    key: String,
-    pool: &State<DbPool>,
-) -> Result<String, status::Custom<String>> {
+fn check_auth_internal(key: String, pool: &DbPool) -> Result<String, status::Custom<String>> {
     let conn = pool.get().map_err(|_| {
         status::Custom(
             Status::InternalServerError,
@@ -23,7 +20,7 @@ async fn check_auth_internal(
         )
     })?;
 
-    let perms = perms_from_key(conn, key).await.ok_or_else(|| {
+    let perms = perms_from_key_sync(&conn, key).ok_or_else(|| {
         status::Custom(
             Status::Unauthorized,
             r#"{"success": false, "error": "Unauthorized"}"#.to_string(),
@@ -53,7 +50,15 @@ pub async fn check_auth(
             )
         })?;
 
-    check_auth_internal(resolved_key, pool).await
+    let pool = pool.inner().clone();
+    rocket::tokio::task::spawn_blocking(move || check_auth_internal(resolved_key, &pool))
+        .await
+        .map_err(|_| {
+            status::Custom(
+                Status::InternalServerError,
+                r#"{"success": false, "error": "Task failed"}"#.to_string(),
+            )
+        })?
 }
 
 #[rocket::post("/check_auth", format = "json", data = "<data>")]
@@ -61,5 +66,14 @@ pub async fn check_auth_post(
     data: Json<CheckAuthData>,
     pool: &State<DbPool>,
 ) -> Result<String, status::Custom<String>> {
-    check_auth_internal(data.key.clone(), pool).await
+    let key = data.key.clone();
+    let pool = pool.inner().clone();
+    rocket::tokio::task::spawn_blocking(move || check_auth_internal(key, &pool))
+        .await
+        .map_err(|_| {
+            status::Custom(
+                Status::InternalServerError,
+                r#"{"success": false, "error": "Task failed"}"#.to_string(),
+            )
+        })?
 }
