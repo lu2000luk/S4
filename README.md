@@ -33,6 +33,7 @@ Planned features:
 ## Structure
 
 - `/server` - The server code (Rust) (API)
+- `/site` - S4's website (React)
 
 ## Technical stuff
 
