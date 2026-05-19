@@ -41,7 +41,11 @@ pub async fn check_auth(
     pool: &State<DbPool>,
 ) -> Result<String, status::Custom<String>> {
     let resolved_key = key
-        .or(auth_header.0)
+        .or_else(|| {
+            auth_header
+                .0
+                .map(|k| k.strip_prefix("Bearer ").unwrap_or(&k).to_string())
+        })
         .or_else(|| cookies.get("key").map(|c| c.value().to_string()))
         .ok_or_else(|| {
             status::Custom(

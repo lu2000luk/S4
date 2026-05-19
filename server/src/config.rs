@@ -1,4 +1,4 @@
-use crate::logger::warn;
+use crate::logger::{warn, log};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -74,14 +74,21 @@ impl Config {
 }
 
 async fn internal_read_config() -> Result<Config, Box<dyn std::error::Error>> {
-    let config_data = tokio::fs::read_to_string(Path::new("config.toml")).await?;
+    let config_path = Path::new("config.toml");
+    if !config_path.exists() {
+        log("Config file not found, creating default config.toml...");
+        let default_config = Config::defaulted();
+        let toml_string = toml::to_string_pretty(&default_config)?;
+        tokio::fs::write(config_path, toml_string).await?;
+    }
+    let config_data = tokio::fs::read_to_string(config_path).await?;
     let config: Config = toml::from_str(&config_data)?;
     Ok(config)
 }
 
 pub async fn config() -> Config {
     internal_read_config().await.unwrap_or_else(|e| {
-        warn(format!("Failed to read config.toml: {}", e).as_str());
+        warn(format!("Failed to load config, using defaults: {}", e).as_str());
         Config::defaulted()
     })
 }
