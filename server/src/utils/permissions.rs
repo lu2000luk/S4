@@ -7,6 +7,15 @@ use crate::utils::{
 
 use crate::logger::warn;
 
+const PERMISSIONS_SELECT_BY_ID: &str = "SELECT id, weight, is_root, create_api_key, create_user, delete_user, edit_user, view_user, bypass_weight, max_action_size, max_backup_size, total_storage_size, max_create_users, convert_file, created_at FROM permissions WHERE id = ?";
+
+const FILE_PERMS_SELECT: &str = r#"
+    SELECT id, permission_id, path, bypass_weight, recursive, read, delete, write,
+           create_file, create_folder, create_link, create_backup, create_with_weight,
+           generate_link, encrypt, created_at
+    FROM file_perms
+"#;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PermType {
     IsRoot,
@@ -134,6 +143,18 @@ impl FilePermission {
     pub fn encrypt(path: impl Into<String>) -> Self {
         Self::new(path, FilePermType::Encrypt)
     }
+
+    pub fn create_with_weight(path: impl Into<String>) -> Self {
+        Self::new(path, FilePermType::CreateWithWeight)
+    }
+
+    pub fn bypass_weight(path: impl Into<String>) -> Self {
+        Self::new(path, FilePermType::BypassWeight)
+    }
+
+    pub fn recursive(path: impl Into<String>) -> Self {
+        Self::new(path, FilePermType::Recursive)
+    }
 }
 
 /// Engine for checking file permissions
@@ -149,40 +170,83 @@ impl FilePermissionEngine {
     }
 
     pub fn has(&self, file_perm: &FilePermission) -> bool {
-        let target_path = normalize_path(&file_perm.path);
+        let target_path = match try_normalize_path(&file_perm.path) {
+            Ok(path) => path,
+            Err(_) => return false,
+        };
 
-        let paths_to_check = get_path_hierarchy(&target_path);
+        self.file_perms.iter().any(|perm| {
+            let Ok(perm_path) = try_normalize_path(&perm.path) else {
+                return false;
+            };
 
-        for check_path in paths_to_check {
-            for perm in &self.file_perms {
-                let perm_path = normalize_path(&perm.path);
+            permission_path_matches(&perm_path, &target_path, perm.recursive)
+                && self.check_perm_type(perm, file_perm.perm_type)
+        })
+    }
 
-                if perm_path == check_path {
-                    if check_path != target_path && !perm.recursive {
-                        continue;
-                    }
+    pub fn has_type(&self, path: impl Into<String>, perm_type: FilePermType) -> bool {
+        self.has(&FilePermission::new(path, perm_type))
+    }
 
-                    if self.check_perm_type(perm, file_perm.perm_type) {
-                        return true;
-                    }
-                }
+    pub fn can_download(&self, path: impl Into<String>) -> bool {
+        self.has_type(path, FilePermType::Read)
+    }
 
-                if perm.recursive && target_path.starts_with(&perm_path) {
-                    let is_proper_parent = perm_path == "/"
-                        || target_path == perm_path
-                        || target_path
-                            .strip_prefix(&perm_path)
-                            .map(|s| s.starts_with('/'))
-                            .unwrap_or(false);
+    pub fn can_generate_direct_link(&self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        self.has_type(path.as_str(), FilePermType::Read)
+            && self.has_type(path, FilePermType::GenerateLink)
+    }
 
-                    if is_proper_parent && self.check_perm_type(perm, file_perm.perm_type) {
-                        return true;
-                    }
-                }
-            }
-        }
+    pub fn can_upload_file(&self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        self.has_type(path.as_str(), FilePermType::Write)
+            && self.has_type(path, FilePermType::CreateFile)
+    }
 
-        false
+    pub fn can_create_folder_path(&self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        self.has_type(path.as_str(), FilePermType::Write)
+            && self.has_type(path, FilePermType::CreateFolder)
+    }
+
+    pub fn can_create_link_path(&self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        self.has_type(path.as_str(), FilePermType::Write)
+            && self.has_type(path, FilePermType::CreateLink)
+    }
+
+    pub fn can_delete_path(&self, path: impl Into<String>) -> bool {
+        self.has_type(path, FilePermType::Delete)
+    }
+
+    pub fn can_create_backup_path(&self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        self.has_type(path.as_str(), FilePermType::Read)
+            && self.has_type(path, FilePermType::CreateBackup)
+    }
+
+    pub fn can_restore_backup_path(&self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        self.has_type(path.as_str(), FilePermType::Write)
+            && self.has_type(path, FilePermType::CreateBackup)
+    }
+
+    pub fn can_encrypt_path(&self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        self.has_type(path.as_str(), FilePermType::Read)
+            && self.has_type(path.as_str(), FilePermType::Write)
+            && self.has_type(path, FilePermType::Encrypt)
+    }
+
+    pub fn can_convert_path(&self, path: impl Into<String>) -> bool {
+        let path = path.into();
+        self.has_type(path.as_str(), FilePermType::Read) && self.has_type(path, FilePermType::Write)
+    }
+
+    pub fn can_create_weighted_child_path(&self, path: impl Into<String>) -> bool {
+        self.has_type(path, FilePermType::CreateWithWeight)
     }
 
     fn check_perm_type(&self, perm: &FilePerms, perm_type: FilePermType) -> bool {
@@ -253,13 +317,13 @@ impl PermissionEngine {
     }
 
     pub fn has(&self, perm: Permission) -> bool {
-        if !self.meets_weight_requirement() {
-            return false;
-        }
-
         // Root bypasses all permission checks
         if self.permissions.is_root {
             return true;
+        }
+
+        if !self.meets_weight_requirement() {
+            return false;
         }
 
         match perm.0 {
@@ -287,12 +351,37 @@ impl PermissionEngine {
     }
 
     pub fn has_weight(&self, min_weight: i32) -> bool {
-        self.permissions.weight >= min_weight || self.permissions.bypass_weight
+        self.permissions.is_root
+            || self.permissions.weight >= min_weight
+            || self.permissions.bypass_weight
+    }
+
+    pub fn can_assign_weight(&self, requested_weight: i32) -> bool {
+        requested_weight >= 0 && self.has_weight(requested_weight)
+    }
+
+    pub fn can_create_api_key_with_weight(&self, requested_weight: i32) -> bool {
+        self.has(Permission::create_api_key()) && self.can_assign_weight(requested_weight)
+    }
+
+    pub fn can_view_users(&self) -> bool {
+        self.has(Permission::view_user())
+    }
+
+    pub fn can_edit_user_with_weight(&self, target_weight: i32) -> bool {
+        self.has(Permission::edit_user()) && self.can_assign_weight(target_weight)
+    }
+
+    pub fn can_delete_user_with_weight(&self, target_weight: i32) -> bool {
+        self.has(Permission::delete_user()) && self.can_assign_weight(target_weight)
     }
 
     pub fn can_action_size(&self, size: i64) -> bool {
         if self.permissions.is_root {
             return true;
+        }
+        if size < 0 {
+            return false;
         }
         match self.permissions.max_action_size {
             Some(max) => size <= max,
@@ -304,6 +393,9 @@ impl PermissionEngine {
         if self.permissions.is_root {
             return true;
         }
+        if size < 0 {
+            return false;
+        }
         match self.permissions.max_backup_size {
             Some(max) => size <= max,
             None => true,
@@ -313,6 +405,9 @@ impl PermissionEngine {
     pub fn can_storage_size(&self, size: i64) -> bool {
         if self.permissions.is_root {
             return true;
+        }
+        if size < 0 {
+            return false;
         }
         match self.permissions.total_storage_size {
             Some(max) => size <= max,
@@ -325,14 +420,17 @@ impl PermissionEngine {
             return true;
         }
         match self.permissions.total_storage_size {
-            Some(max) => occupied_size + additional_size <= max,
-            None => true,
+            Some(max) => checked_total_within_limit(occupied_size, additional_size, max),
+            None => occupied_size >= 0 && additional_size >= 0,
         }
     }
 
     pub fn remaining_storage(&self, occupied_size: i64) -> Option<i64> {
         if self.permissions.is_root {
             return None; // Unlimited
+        }
+        if occupied_size < 0 {
+            return self.permissions.total_storage_size;
         }
         self.permissions
             .total_storage_size
@@ -342,6 +440,9 @@ impl PermissionEngine {
     pub fn can_create_users(&self, count: i64) -> bool {
         if self.permissions.is_root {
             return true;
+        }
+        if count < 0 {
+            return false;
         }
         match self.permissions.max_create_users {
             Some(max) => count < max,
@@ -354,9 +455,41 @@ impl PermissionEngine {
             return true;
         }
         match self.permissions.max_create_users {
-            Some(max) => current_count + additional <= max,
-            None => true,
+            Some(max) => checked_total_within_limit(current_count, additional, max),
+            None => current_count >= 0 && additional >= 0,
         }
+    }
+
+    pub fn can_create_subusers(
+        &self,
+        current_count: i64,
+        additional: i64,
+        requested_weight: i32,
+    ) -> bool {
+        self.has(Permission::create_user())
+            && self.can_create_more_users(current_count, additional)
+            && self.can_assign_weight(requested_weight)
+    }
+
+    pub fn can_store_additional(&self, occupied_size: i64, additional_size: i64) -> bool {
+        self.can_storage_size_with_occupied(additional_size, occupied_size)
+    }
+
+    pub fn can_run_file_conversion(&self, action_size: i64) -> bool {
+        self.has(Permission::convert_file()) && self.can_action_size(action_size)
+    }
+
+    pub fn can_run_backup(&self, backup_size: i64) -> bool {
+        self.can_backup_size(backup_size)
+    }
+
+    pub fn is_within_time_window(
+        now: chrono::NaiveDateTime,
+        valid_from: Option<chrono::NaiveDateTime>,
+        valid_until: Option<chrono::NaiveDateTime>,
+    ) -> bool {
+        valid_from.map(|start| now >= start).unwrap_or(true)
+            && valid_until.map(|end| now <= end).unwrap_or(true)
     }
 
     pub fn get_id(&self) -> &str {
@@ -372,23 +505,48 @@ impl PermissionEngine {
         &mut self.permissions
     }
 
-    pub async fn get_file_perms(&self, conn: &DBConn, path: &str) -> FilePermissionEngine {
-        let file_perms = fetch_file_perms_recursive(conn, &self.permissions.id, path);
-        FilePermissionEngine::new(file_perms, path.to_string())
+    pub async fn get_file_perms(
+        &self,
+        conn: &DBConn,
+        path: &str,
+    ) -> Result<FilePermissionEngine, String> {
+        self.get_file_perms_sync(conn, path)
     }
 
-    pub fn get_file_perms_sync(&self, conn: &DBConn, path: &str) -> FilePermissionEngine {
-        let file_perms = fetch_file_perms_recursive(conn, &self.permissions.id, path);
-        FilePermissionEngine::new(file_perms, path.to_string())
+    pub fn get_file_perms_sync(
+        &self,
+        conn: &DBConn,
+        path: &str,
+    ) -> Result<FilePermissionEngine, String> {
+        let normalized_path = try_normalize_path(path)?;
+        let file_perms = fetch_file_perms_recursive(conn, &self.permissions.id, &normalized_path)?;
+        Ok(FilePermissionEngine::new(file_perms, normalized_path))
     }
 
-    pub async fn has_file_perm(&self, conn: &DBConn, file_perm: &FilePermission) -> bool {
+    pub async fn has_file_perm(
+        &self,
+        conn: &DBConn,
+        file_perm: &FilePermission,
+    ) -> Result<bool, String> {
         if self.permissions.is_root {
-            return true;
+            return Ok(true);
         }
 
-        let file_engine = self.get_file_perms(conn, &file_perm.path).await;
-        file_engine.has(file_perm)
+        let file_engine = self.get_file_perms(conn, &file_perm.path).await?;
+        Ok(file_engine.has(file_perm))
+    }
+
+    pub fn has_file_perm_sync(
+        &self,
+        conn: &DBConn,
+        file_perm: &FilePermission,
+    ) -> Result<bool, String> {
+        if self.permissions.is_root {
+            return Ok(true);
+        }
+
+        let file_engine = self.get_file_perms_sync(conn, &file_perm.path)?;
+        Ok(file_engine.has(file_perm))
     }
 
     pub fn set_weight(&mut self, weight: i32) -> &mut Self {
@@ -600,11 +758,13 @@ pub struct FilePermBuilder {
 
 impl FilePermBuilder {
     pub fn new(permission_id: String, path: String) -> Self {
+        let normalized_path = try_normalize_path(&path).unwrap_or_else(|_| path.clone());
+
         FilePermBuilder {
             file_perm: FilePerms {
                 id: generate_id(),
                 permission_id,
-                path,
+                path: normalized_path,
                 bypass_weight: false,
                 recursive: false,
                 read: false,
@@ -742,6 +902,9 @@ impl FilePermBuilder {
     }
 
     pub async fn commit(self, conn: &DBConn) -> Result<FilePerms, String> {
+        let mut file_perm = self.file_perm;
+        file_perm.path = try_normalize_path(&file_perm.path)?;
+
         if self.is_new {
             let query = r#"
                 INSERT INTO file_perms (
@@ -754,22 +917,22 @@ impl FilePermBuilder {
             conn.execute(
                 query,
                 duckdb::params![
-                    self.file_perm.id,
-                    self.file_perm.permission_id,
-                    self.file_perm.path,
-                    self.file_perm.bypass_weight,
-                    self.file_perm.recursive,
-                    self.file_perm.read,
-                    self.file_perm.delete,
-                    self.file_perm.write,
-                    self.file_perm.create_file,
-                    self.file_perm.create_folder,
-                    self.file_perm.create_link,
-                    self.file_perm.create_backup,
-                    self.file_perm.create_with_weight,
-                    self.file_perm.generate_link,
-                    self.file_perm.encrypt,
-                    self.file_perm.created_at,
+                    file_perm.id,
+                    file_perm.permission_id,
+                    file_perm.path,
+                    file_perm.bypass_weight,
+                    file_perm.recursive,
+                    file_perm.read,
+                    file_perm.delete,
+                    file_perm.write,
+                    file_perm.create_file,
+                    file_perm.create_folder,
+                    file_perm.create_link,
+                    file_perm.create_backup,
+                    file_perm.create_with_weight,
+                    file_perm.generate_link,
+                    file_perm.encrypt,
+                    file_perm.created_at,
                 ],
             )
             .map_err(|e| format!("Failed to create file permission: {}", e))?;
@@ -795,26 +958,26 @@ impl FilePermBuilder {
             conn.execute(
                 query,
                 duckdb::params![
-                    self.file_perm.path,
-                    self.file_perm.bypass_weight,
-                    self.file_perm.recursive,
-                    self.file_perm.read,
-                    self.file_perm.delete,
-                    self.file_perm.write,
-                    self.file_perm.create_file,
-                    self.file_perm.create_folder,
-                    self.file_perm.create_link,
-                    self.file_perm.create_backup,
-                    self.file_perm.create_with_weight,
-                    self.file_perm.generate_link,
-                    self.file_perm.encrypt,
-                    self.file_perm.id,
+                    file_perm.path,
+                    file_perm.bypass_weight,
+                    file_perm.recursive,
+                    file_perm.read,
+                    file_perm.delete,
+                    file_perm.write,
+                    file_perm.create_file,
+                    file_perm.create_folder,
+                    file_perm.create_link,
+                    file_perm.create_backup,
+                    file_perm.create_with_weight,
+                    file_perm.generate_link,
+                    file_perm.encrypt,
+                    file_perm.id,
                 ],
             )
             .map_err(|e| format!("Failed to update file permission: {}", e))?;
         }
 
-        Ok(self.file_perm)
+        Ok(file_perm)
     }
 }
 
@@ -829,7 +992,7 @@ pub async fn delete_file_perms_for_path(
     permission_id: &str,
     path: &str,
 ) -> Result<(), String> {
-    let normalized = normalize_path(path);
+    let normalized = try_normalize_path(path)?;
     conn.execute(
         "DELETE FROM file_perms WHERE permission_id = ? AND path = ?",
         duckdb::params![permission_id, normalized],
@@ -839,17 +1002,60 @@ pub async fn delete_file_perms_for_path(
 }
 
 fn normalize_path(path: &str) -> String {
-    let mut normalized = path.trim().to_string();
+    try_normalize_path(path).unwrap_or_else(|_| "/__invalid_permission_path__".to_string())
+}
 
-    if !normalized.starts_with('/') {
-        normalized = format!("/{}", normalized);
+fn try_normalize_path(path: &str) -> Result<String, String> {
+    let trimmed = path.trim();
+
+    if trimmed.contains('\0') {
+        return Err("Permission path contains a null byte".to_string());
     }
 
-    if normalized.len() > 1 && normalized.ends_with('/') {
-        normalized.pop();
+    let slash_path = trimmed.replace('\\', "/");
+    let mut components = Vec::new();
+
+    for component in slash_path.split('/') {
+        match component {
+            "" | "." => {}
+            ".." => {
+                return Err(format!(
+                    "Permission path cannot contain parent traversal: {}",
+                    path
+                ));
+            }
+            _ => components.push(component),
+        }
     }
 
-    normalized
+    if components.is_empty() {
+        Ok("/".to_string())
+    } else {
+        Ok(format!("/{}", components.join("/")))
+    }
+}
+
+fn permission_path_matches(perm_path: &str, target_path: &str, recursive: bool) -> bool {
+    perm_path == target_path || (recursive && is_same_or_descendant(target_path, perm_path))
+}
+
+fn is_same_or_descendant(target_path: &str, parent_path: &str) -> bool {
+    parent_path == "/"
+        || target_path == parent_path
+        || target_path
+            .strip_prefix(parent_path)
+            .map(|remaining| remaining.starts_with('/'))
+            .unwrap_or(false)
+}
+
+fn checked_total_within_limit(current: i64, additional: i64, max: i64) -> bool {
+    current >= 0
+        && additional >= 0
+        && max >= 0
+        && current
+            .checked_add(additional)
+            .map(|total| total <= max)
+            .unwrap_or(false)
 }
 
 /// Get path hierarchy from most specific to root
@@ -877,57 +1083,83 @@ fn get_path_hierarchy(path: &str) -> Vec<String> {
     paths
 }
 
-fn fetch_file_perms_recursive(conn: &DBConn, permission_id: &str, path: &str) -> Vec<FilePerms> {
-    let query = r#"
-        SELECT id, permission_id, path, bypass_weight, recursive, read, delete, write,
-               create_file, create_folder, create_link, create_backup, create_with_weight,
-               generate_link, encrypt, created_at
-        FROM file_perms
+fn fetch_file_perms_recursive(
+    conn: &DBConn,
+    permission_id: &str,
+    path: &str,
+) -> Result<Vec<FilePerms>, String> {
+    let query = format!(
+        r#"{}
         WHERE permission_id = ?
         ORDER BY length(path) DESC
-    "#;
+    "#,
+        FILE_PERMS_SELECT
+    );
 
-    let mut stmt = match conn.prepare(query) {
-        Ok(stmt) => stmt,
-        Err(_) => return Vec::new(),
-    };
+    let mut stmt = conn
+        .prepare(&query)
+        .map_err(|e| format!("Failed to prepare file permissions query: {}", e))?;
 
-    let rows = stmt.query_map(duckdb::params![permission_id], |row| {
-        Ok(FilePerms {
-            id: row.get(0)?,
-            permission_id: row.get(1)?,
-            path: row.get(2)?,
-            bypass_weight: row.get(3)?,
-            recursive: row.get(4)?,
-            read: row.get(5)?,
-            delete: row.get(6)?,
-            write: row.get(7)?,
-            create_file: row.get(8)?,
-            create_folder: row.get(9)?,
-            create_link: row.get(10)?,
-            create_backup: row.get(11)?,
-            create_with_weight: row.get(12)?,
-            generate_link: row.get(13)?,
-            encrypt: row.get(14)?,
-            created_at: row.get(15)?,
+    let rows = stmt
+        .query_map(duckdb::params![permission_id], row_to_file_perms)
+        .map_err(|e| format!("Failed to query file permissions: {}", e))?;
+
+    let normalized_path = try_normalize_path(path)?;
+    rows.map(|row| row.map_err(|e| format!("Failed to read file permission row: {}", e)))
+        .filter_map(|row| match row {
+            Ok(fp) => match try_normalize_path(&fp.path) {
+                Ok(fp_path)
+                    if permission_path_matches(&fp_path, &normalized_path, fp.recursive) =>
+                {
+                    Some(Ok(fp))
+                }
+                Ok(_) => None,
+                Err(e) => Some(Err(e)),
+            },
+            Err(e) => Some(Err(e)),
         })
-    });
+        .collect()
+}
 
-    let normalized_path = normalize_path(path);
-    let path_hierarchy = get_path_hierarchy(&normalized_path);
+fn row_to_file_perms(row: &duckdb::Row<'_>) -> duckdb::Result<FilePerms> {
+    Ok(FilePerms {
+        id: row.get(0)?,
+        permission_id: row.get(1)?,
+        path: row.get(2)?,
+        bypass_weight: row.get(3)?,
+        recursive: row.get(4)?,
+        read: row.get(5)?,
+        delete: row.get(6)?,
+        write: row.get(7)?,
+        create_file: row.get(8)?,
+        create_folder: row.get(9)?,
+        create_link: row.get(10)?,
+        create_backup: row.get(11)?,
+        create_with_weight: row.get(12)?,
+        generate_link: row.get(13)?,
+        encrypt: row.get(14)?,
+        created_at: row.get(15)?,
+    })
+}
 
-    match rows {
-        Ok(rows) => rows
-            .filter_map(|r| r.ok())
-            .filter(|fp| {
-                let fp_path = normalize_path(&fp.path);
-
-                path_hierarchy.contains(&fp_path)
-                    || (fp.recursive && normalized_path.starts_with(&fp_path))
-            })
-            .collect(),
-        Err(_) => Vec::new(),
-    }
+fn row_to_permissions(row: &duckdb::Row<'_>) -> duckdb::Result<Permissions> {
+    Ok(Permissions {
+        id: row.get(0)?,
+        weight: row.get(1)?,
+        is_root: row.get(2)?,
+        create_api_key: row.get(3)?,
+        create_user: row.get(4)?,
+        delete_user: row.get(5)?,
+        edit_user: row.get(6)?,
+        view_user: row.get(7)?,
+        bypass_weight: row.get(8)?,
+        max_action_size: row.get(9)?,
+        max_backup_size: row.get(10)?,
+        total_storage_size: row.get(11)?,
+        max_create_users: row.get(12)?,
+        convert_file: row.get(13)?,
+        created_at: row.get(14)?,
+    })
 }
 
 fn generate_id() -> String {
@@ -988,27 +1220,9 @@ pub fn perms_from_key_sync(conn: &DBConn, key: String) -> Option<Permissions> {
     let permission_id = permission_id?;
 
     conn.query_row(
-        "SELECT id, weight, is_root, create_api_key, create_user, delete_user, edit_user, view_user, bypass_weight, max_action_size, max_backup_size, total_storage_size, max_create_users, convert_file, created_at FROM permissions WHERE id = ?",
+        PERMISSIONS_SELECT_BY_ID,
         duckdb::params![permission_id],
-        |row| {
-            Ok(Permissions {
-                id: row.get(0)?,
-                weight: row.get(1)?,
-                is_root: row.get(2)?,
-                create_api_key: row.get(3)?,
-                create_user: row.get(4)?,
-                delete_user: row.get(5)?,
-                edit_user: row.get(6)?,
-                view_user: row.get(7)?,
-                bypass_weight: row.get(8)?,
-                max_action_size: row.get(9)?,
-                max_backup_size: row.get(10)?,
-                total_storage_size: row.get(11)?,
-                max_create_users: row.get(12)?,
-                convert_file: row.get(13)?,
-                created_at: row.get(14)?,
-            })
-        },
+        row_to_permissions,
     )
     .ok()
 }
@@ -1026,30 +1240,7 @@ pub async fn engine_from_key(conn: &DBConn, key: String) -> Option<PermissionEng
 }
 
 pub async fn load_permission(conn: &DBConn, permission_id: &str) -> Option<Permissions> {
-    conn.query_row(
-        "SELECT id, weight, is_root, create_api_key, create_user, delete_user, edit_user, view_user, bypass_weight, max_action_size, max_backup_size, total_storage_size, max_create_users, convert_file, created_at FROM permissions WHERE id = ?",
-        duckdb::params![permission_id],
-        |row| {
-            Ok(Permissions {
-                id: row.get(0)?,
-                weight: row.get(1)?,
-                is_root: row.get(2)?,
-                create_api_key: row.get(3)?,
-                create_user: row.get(4)?,
-                delete_user: row.get(5)?,
-                edit_user: row.get(6)?,
-                view_user: row.get(7)?,
-                bypass_weight: row.get(8)?,
-                max_action_size: row.get(9)?,
-                max_backup_size: row.get(10)?,
-                total_storage_size: row.get(11)?,
-                max_create_users: row.get(12)?,
-                convert_file: row.get(13)?,
-                created_at: row.get(14)?,
-            })
-        },
-    )
-    .ok()
+    load_permission_sync(conn, permission_id)
 }
 
 pub async fn load_engine(conn: &DBConn, permission_id: &str) -> Option<PermissionEngine> {
@@ -1060,27 +1251,9 @@ pub async fn load_engine(conn: &DBConn, permission_id: &str) -> Option<Permissio
 
 pub fn load_permission_sync(conn: &DBConn, permission_id: &str) -> Option<Permissions> {
     conn.query_row(
-        "SELECT id, weight, is_root, create_api_key, create_user, delete_user, edit_user, view_user, bypass_weight, max_action_size, max_backup_size, total_storage_size, max_create_users, convert_file, created_at FROM permissions WHERE id = ?",
+        PERMISSIONS_SELECT_BY_ID,
         duckdb::params![permission_id],
-        |row| {
-            Ok(Permissions {
-                id: row.get(0)?,
-                weight: row.get(1)?,
-                is_root: row.get(2)?,
-                create_api_key: row.get(3)?,
-                create_user: row.get(4)?,
-                delete_user: row.get(5)?,
-                edit_user: row.get(6)?,
-                view_user: row.get(7)?,
-                bypass_weight: row.get(8)?,
-                max_action_size: row.get(9)?,
-                max_backup_size: row.get(10)?,
-                total_storage_size: row.get(11)?,
-                max_create_users: row.get(12)?,
-                convert_file: row.get(13)?,
-                created_at: row.get(14)?,
-            })
-        },
+        row_to_permissions,
     )
     .ok()
 }
@@ -1094,75 +1267,29 @@ pub async fn engine_from_id(conn: &DBConn, permission_id: &str) -> Option<Permis
 }
 
 pub async fn load_file_perm(conn: &DBConn, id: &str) -> Option<FilePerms> {
-    conn.query_row(
-        r#"
-        SELECT id, permission_id, path, bypass_weight, recursive, read, delete, write,
-               create_file, create_folder, create_link, create_backup, create_with_weight,
-               generate_link, encrypt, created_at
-        FROM file_perms WHERE id = ?
-        "#,
-        duckdb::params![id],
-        |row| {
-            Ok(FilePerms {
-                id: row.get(0)?,
-                permission_id: row.get(1)?,
-                path: row.get(2)?,
-                bypass_weight: row.get(3)?,
-                recursive: row.get(4)?,
-                read: row.get(5)?,
-                delete: row.get(6)?,
-                write: row.get(7)?,
-                create_file: row.get(8)?,
-                create_folder: row.get(9)?,
-                create_link: row.get(10)?,
-                create_backup: row.get(11)?,
-                create_with_weight: row.get(12)?,
-                generate_link: row.get(13)?,
-                encrypt: row.get(14)?,
-                created_at: row.get(15)?,
-            })
-        },
-    )
-    .ok()
+    let query = format!("{} WHERE id = ?", FILE_PERMS_SELECT);
+
+    conn.query_row(&query, duckdb::params![id], row_to_file_perms)
+        .ok()
 }
 
 pub async fn load_all_file_perms(conn: &DBConn, permission_id: &str) -> Vec<FilePerms> {
     warn("Loading all file permissions.");
 
-    let query = r#"
-        SELECT id, permission_id, path, bypass_weight, recursive, read, delete, write,
-               create_file, create_folder, create_link, create_backup, create_with_weight,
-               generate_link, encrypt, created_at
-        FROM file_perms
+    let query = format!(
+        r#"{}
         WHERE permission_id = ?
         ORDER BY path
-    "#;
+    "#,
+        FILE_PERMS_SELECT
+    );
 
-    let mut stmt = match conn.prepare(query) {
+    let mut stmt = match conn.prepare(&query) {
         Ok(stmt) => stmt,
         Err(_) => return Vec::new(),
     };
 
-    let rows = stmt.query_map(duckdb::params![permission_id], |row| {
-        Ok(FilePerms {
-            id: row.get(0)?,
-            permission_id: row.get(1)?,
-            path: row.get(2)?,
-            bypass_weight: row.get(3)?,
-            recursive: row.get(4)?,
-            read: row.get(5)?,
-            delete: row.get(6)?,
-            write: row.get(7)?,
-            create_file: row.get(8)?,
-            create_folder: row.get(9)?,
-            create_link: row.get(10)?,
-            create_backup: row.get(11)?,
-            create_with_weight: row.get(12)?,
-            generate_link: row.get(13)?,
-            encrypt: row.get(14)?,
-            created_at: row.get(15)?,
-        })
-    });
+    let rows = stmt.query_map(duckdb::params![permission_id], row_to_file_perms);
 
     match rows {
         Ok(rows) => rows.filter_map(|r| r.ok()).collect(),
@@ -1281,6 +1408,15 @@ mod tests {
     }
 
     #[test]
+    fn test_root_bypasses_required_weight() {
+        let perms = mock_permissions(true, 0);
+        let engine = to_engine(perms).require(PermWeight::new(100_000));
+
+        assert!(engine.has(Permission::delete_user()));
+        assert!(engine.has_weight(100_000));
+    }
+
+    #[test]
     fn test_weight_requirement() {
         let perms = mock_permissions(false, 50);
         let engine = to_engine(perms);
@@ -1316,6 +1452,49 @@ mod tests {
         assert!(engine.has_weight(50));
         assert!(engine.has_weight(30));
         assert!(!engine.has_weight(100));
+        assert!(engine.can_assign_weight(50));
+        assert!(!engine.can_assign_weight(51));
+        assert!(!engine.can_assign_weight(-1));
+    }
+
+    #[test]
+    fn test_api_key_and_subuser_weight_guards() {
+        let perms = mock_permissions(false, 50);
+        let mut engine = to_engine(perms);
+
+        assert!(engine.can_create_api_key_with_weight(50));
+        assert!(!engine.can_create_api_key_with_weight(51));
+        assert!(!engine.can_create_api_key_with_weight(-1));
+
+        assert!(!engine.can_create_subusers(0, 1, 10));
+        engine.set_create_user(true);
+        assert!(engine.can_create_subusers(4, 1, 50));
+        assert!(!engine.can_create_subusers(4, 2, 50));
+        assert!(!engine.can_create_subusers(0, 1, 51));
+        assert!(!engine.can_create_subusers(0, -1, 10));
+
+        engine.set_bypass_weight(true);
+        assert!(engine.can_create_api_key_with_weight(10_000));
+        assert!(engine.can_create_subusers(0, 1, 10_000));
+    }
+
+    #[test]
+    fn test_user_management_weight_guards() {
+        let perms = mock_permissions(false, 50);
+        let mut engine = to_engine(perms);
+
+        assert!(engine.can_view_users());
+        assert!(engine.can_edit_user_with_weight(50));
+        assert!(!engine.can_edit_user_with_weight(51));
+        assert!(!engine.can_delete_user_with_weight(50));
+
+        engine.set_delete_user(true);
+        assert!(engine.can_delete_user_with_weight(50));
+        assert!(!engine.can_delete_user_with_weight(51));
+
+        let root = to_engine(mock_permissions(true, 0));
+        assert!(root.can_edit_user_with_weight(1_000_000));
+        assert!(root.can_delete_user_with_weight(1_000_000));
     }
 
     #[test]
@@ -1326,10 +1505,12 @@ mod tests {
         assert!(engine.can_action_size(500));
         assert!(engine.can_action_size(1024));
         assert!(!engine.can_action_size(2000));
+        assert!(!engine.can_action_size(-1));
 
         assert!(engine.can_backup_size(1000));
         assert!(engine.can_backup_size(2048));
         assert!(!engine.can_backup_size(3000));
+        assert!(!engine.can_backup_size(-1));
     }
 
     #[test]
@@ -1340,10 +1521,25 @@ mod tests {
         assert!(engine.can_storage_size_with_occupied(1000, 5000));
         assert!(engine.can_storage_size_with_occupied(5000, 5000));
         assert!(!engine.can_storage_size_with_occupied(6000, 5000));
+        assert!(!engine.can_storage_size_with_occupied(-1, 5000));
+        assert!(!engine.can_storage_size_with_occupied(1, i64::MAX));
 
         assert_eq!(engine.remaining_storage(5000), Some(5240));
         assert_eq!(engine.remaining_storage(10240), Some(0));
         assert_eq!(engine.remaining_storage(15000), Some(0));
+    }
+
+    #[test]
+    fn test_future_workflow_global_limits() {
+        let perms = mock_permissions(false, 50);
+        let engine = to_engine(perms);
+
+        assert!(engine.can_store_additional(5000, 5000));
+        assert!(!engine.can_store_additional(5000, 6000));
+        assert!(engine.can_run_file_conversion(1024));
+        assert!(!engine.can_run_file_conversion(1025));
+        assert!(engine.can_run_backup(2048));
+        assert!(!engine.can_run_backup(2049));
     }
 
     #[test]
@@ -1352,6 +1548,9 @@ mod tests {
         assert_eq!(normalize_path("/test"), "/test");
         assert_eq!(normalize_path("/test/"), "/test");
         assert_eq!(normalize_path("/"), "/");
+        assert_eq!(try_normalize_path(r"\test\\child").unwrap(), "/test/child");
+        assert_eq!(try_normalize_path("/test//./child").unwrap(), "/test/child");
+        assert!(try_normalize_path("/test/../child").is_err());
     }
 
     #[test]
@@ -1380,6 +1579,175 @@ mod tests {
         let engine3 =
             FilePermissionEngine::new(mock_file_perms(), "/home/user/secret/child".to_string());
         assert!(!engine3.has(&FilePermission::encrypt("/home/user/secret/child")));
+    }
+
+    #[test]
+    fn test_recursive_path_boundaries() {
+        let file_perms = vec![FilePerms {
+            id: "fp".to_string(),
+            permission_id: "test_id".to_string(),
+            path: "/home/user".to_string(),
+            bypass_weight: false,
+            recursive: true,
+            read: true,
+            delete: false,
+            write: false,
+            create_file: false,
+            create_folder: false,
+            create_link: false,
+            create_backup: false,
+            create_with_weight: false,
+            generate_link: false,
+            encrypt: false,
+            created_at: chrono::DateTime::from_timestamp(0, 0).unwrap().naive_utc(),
+        }];
+        let engine = FilePermissionEngine::new(file_perms, "/home/user".to_string());
+
+        assert!(engine.has(&FilePermission::read("/home/user/docs")));
+        assert!(!engine.has(&FilePermission::read("/home/userland")));
+    }
+
+    #[test]
+    fn test_file_workflow_helpers_for_planned_features() {
+        let file_perm = FilePermBuilder::new("test_id".to_string(), "/bucket".to_string())
+            .recursive(true)
+            .allow_all()
+            .build();
+        let engine =
+            FilePermissionEngine::new(vec![file_perm], "/bucket/docs/file.txt".to_string());
+
+        assert!(engine.can_download("/bucket/docs/file.txt"));
+        assert!(engine.can_generate_direct_link("/bucket/docs/file.txt"));
+        assert!(engine.can_upload_file("/bucket/docs/file.txt"));
+        assert!(engine.can_create_folder_path("/bucket/docs/new"));
+        assert!(engine.can_create_link_path("/bucket/docs/link"));
+        assert!(engine.can_create_backup_path("/bucket/docs/file.txt"));
+        assert!(engine.can_restore_backup_path("/bucket/docs/file.txt"));
+        assert!(engine.can_encrypt_path("/bucket/docs/file.txt"));
+        assert!(engine.can_convert_path("/bucket/docs/file.txt"));
+        assert!(engine.can_create_weighted_child_path("/bucket/docs/file.txt"));
+        assert!(engine.can_delete_path("/bucket/docs/file.txt"));
+        assert!(!engine.can_download("/bucket-neighbor/file.txt"));
+    }
+
+    #[test]
+    fn test_file_workflow_helpers_require_composite_permissions() {
+        let link_only = FilePermBuilder::new("test_id".to_string(), "/links".to_string())
+            .recursive(true)
+            .generate_link(true)
+            .build();
+        let encrypt_without_write =
+            FilePermBuilder::new("test_id".to_string(), "/encrypted".to_string())
+                .recursive(true)
+                .read(true)
+                .encrypt(true)
+                .build();
+        let backup_without_read =
+            FilePermBuilder::new("test_id".to_string(), "/backups".to_string())
+                .recursive(true)
+                .create_backup(true)
+                .build();
+        let engine = FilePermissionEngine::new(
+            vec![link_only, encrypt_without_write, backup_without_read],
+            "/".to_string(),
+        );
+
+        assert!(!engine.can_generate_direct_link("/links/file.txt"));
+        assert!(!engine.can_encrypt_path("/encrypted/file.txt"));
+        assert!(!engine.can_create_backup_path("/backups/file.txt"));
+    }
+
+    #[test]
+    fn test_has_all_and_has_any_for_multi_step_file_actions() {
+        let file_perm = FilePermBuilder::new("test_id".to_string(), "/bucket".to_string())
+            .recursive(true)
+            .read(true)
+            .write(true)
+            .create_file(true)
+            .build();
+        let engine = FilePermissionEngine::new(vec![file_perm], "/bucket/file.txt".to_string());
+
+        assert!(engine.has_all(&[
+            FilePermission::read("/bucket/file.txt"),
+            FilePermission::write("/bucket/file.txt"),
+            FilePermission::create_file("/bucket/file.txt"),
+        ]));
+        assert!(engine.has_any(&[
+            FilePermission::delete("/bucket/file.txt"),
+            FilePermission::read("/bucket/file.txt"),
+        ]));
+        assert!(!engine.has_all(&[
+            FilePermission::read("/bucket/file.txt"),
+            FilePermission::delete("/bucket/file.txt"),
+        ]));
+    }
+
+    #[test]
+    fn test_invalid_permission_paths_are_denied() {
+        let file_perm = FilePermBuilder::new("test_id".to_string(), "/bucket".to_string())
+            .recursive(true)
+            .allow_all()
+            .build();
+        let engine = FilePermissionEngine::new(vec![file_perm], "/bucket".to_string());
+
+        assert!(!engine.can_download("/bucket/../secret"));
+        assert!(!engine.can_upload_file("/bucket/\0/file.txt"));
+    }
+
+    #[test]
+    fn test_file_perm_builder_normalizes_paths() {
+        let file_perm =
+            FilePermBuilder::new("test_id".to_string(), r"home\\user//docs/".to_string()).build();
+
+        assert_eq!(file_perm.path, "/home/user/docs");
+    }
+
+    #[test]
+    fn test_file_perm_builder_presets_are_consistent() {
+        let read_all = FilePermBuilder::new("test_id".to_string(), "/read".to_string())
+            .allow_read_all()
+            .build();
+        assert!(read_all.read);
+        assert!(read_all.generate_link);
+        assert!(!read_all.write);
+
+        let write_all = FilePermBuilder::new("test_id".to_string(), "/write".to_string())
+            .allow_write_all()
+            .build();
+        assert!(write_all.write);
+        assert!(write_all.create_file);
+        assert!(write_all.create_folder);
+        assert!(write_all.create_link);
+        assert!(write_all.create_backup);
+        assert!(!write_all.read);
+    }
+
+    #[test]
+    fn test_time_window_helper_for_future_time_limits() {
+        let now = chrono::DateTime::from_timestamp(100, 0)
+            .unwrap()
+            .naive_utc();
+        let before = chrono::DateTime::from_timestamp(50, 0).unwrap().naive_utc();
+        let after = chrono::DateTime::from_timestamp(150, 0)
+            .unwrap()
+            .naive_utc();
+
+        assert!(PermissionEngine::is_within_time_window(now, None, None));
+        assert!(PermissionEngine::is_within_time_window(
+            now,
+            Some(before),
+            Some(after)
+        ));
+        assert!(!PermissionEngine::is_within_time_window(
+            now,
+            Some(after),
+            None
+        ));
+        assert!(!PermissionEngine::is_within_time_window(
+            now,
+            None,
+            Some(before)
+        ));
     }
 
     #[test]

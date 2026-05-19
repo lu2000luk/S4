@@ -48,6 +48,7 @@ pub async fn get_file(
         let path_str = path_clone.to_str().unwrap();
         let has_read = perms
             .get_file_perms_sync(&conn, path_str)
+            .map_err(|e| status::Custom(Status::InternalServerError, format!("ERROR {}", e)))?
             .has(&FilePermission::new(
                 String::from(path_str),
                 FilePermType::Read,

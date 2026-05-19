@@ -1,7 +1,6 @@
 use crate::utils::complex::AuthHeader;
 use rocket::http::CookieJar;
 
-
 /// #[rocket::get("/example?<key>")]
 /// pub async fn example(
 ///     key: Option<String>,
@@ -19,6 +18,14 @@ pub fn get_auth_key(
     cookies: &CookieJar<'_>,
 ) -> Option<String> {
     query_key
-        .or_else(|| auth_header.0.clone())
+        .or_else(|| {
+            auth_header.0.clone().and_then(|header| {
+                if header.starts_with("Bearer ") {
+                    Some(header[7..].to_string())
+                } else {
+                    Some(header)
+                }
+            })
+        })
         .or_else(|| cookies.get("key").map(|c| c.value().to_string()))
 }

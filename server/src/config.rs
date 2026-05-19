@@ -1,6 +1,6 @@
+use crate::logger::warn;
+use serde::{Deserialize, Serialize};
 use std::path::Path;
-use serde::{Serialize, Deserialize};
-use crate::logger::{warn};
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Config {
@@ -25,5 +25,3 @@ pub async fn config() -> Config {
         }
     })
 }
-
-
