@@ -17,3 +17,14 @@ rand = "0.9.2"
 base64 = "0.22.1"
 chrono = "0.4.42"
 mime-type = "0.2.0"
+reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls", "stream"] }
+tokio-util = { version = "0.7.17", features = ["io"] }
+futures-util = "0.3.31"
+sha1 = "0.10.6"
+url = "2.5.7"
+data-url = "0.3.2"
+suppaftp = { version = "8.0.3", features = ["tokio"] }
+git2 = "0.20.2"
+
+[dev-dependencies]
+tempfile = "3.23.0"

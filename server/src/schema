@@ -20,9 +20,11 @@ metadata json (optional, default = {})
 type "file" | "folder" | "link"
 mime_type string
 size int
-link "http" | "local" | "base64_data_url" | "ftp" | "git" (optional)
-link_target string (optional) (can be deserialized json)
-sync {
+    link "http" | "local" | "base64_data_url" | "ftp" | "git" (optional)
+    link_target string (optional) (can be deserialized json)
+    cache boolean
+    cache_dur int (milliseconds)
+    sync {
     sync_on "view" | "manual" | "interval"
     sync_interval int (seconds)
     last_synced timestamp (optional)

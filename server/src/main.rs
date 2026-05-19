@@ -51,11 +51,11 @@ async fn main() {
     let config = CONFIG.lock().unwrap();
     let config_ref = config.as_ref().unwrap();
     log("Preparing folders...");
-    create_path_recursive(Option::from(config_ref.mount.clone().unwrap()));
+    create_path_recursive(Option::from(config_ref.mount().to_string()));
 
-    let mount = config_ref.mount.clone().unwrap();
-    let port = config_ref.port.clone();
-    let host = config_ref.host.clone();
+    let mount = config_ref.mount().to_string();
+    let port = config_ref.port();
+    let host = config_ref.host().to_string();
     drop(config);
 
     log("Creating database connection pool...");

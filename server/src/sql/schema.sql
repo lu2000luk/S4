@@ -63,12 +63,20 @@ CREATE TABLE IF NOT EXISTS files (
     size BIGINT NOT NULL DEFAULT 0,
     link VARCHAR CHECK (link IN ('http', 'local', 'base64_data_url', 'ftp', 'git')),
     link_target VARCHAR,
+    cache BOOLEAN NOT NULL DEFAULT FALSE,
+    cache_dur BIGINT NOT NULL DEFAULT 0,
     sync_on VARCHAR NOT NULL CHECK (sync_on IN ('view', 'manual', 'interval')) DEFAULT 'manual',
     sync_interval INTEGER,
     last_synced TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- UPDATE: ADD CACHE
+ALTER TABLE files ADD COLUMN IF NOT EXISTS cache BOOLEAN DEFAULT FALSE;
+ALTER TABLE files ADD COLUMN IF NOT EXISTS cache_dur BIGINT DEFAULT 0;
+UPDATE files SET cache = FALSE WHERE cache IS NULL;
+UPDATE files SET cache_dur = 0 WHERE cache_dur IS NULL;
 
 -- BACKUPS
 CREATE TABLE IF NOT EXISTS backups (
