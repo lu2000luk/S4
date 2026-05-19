@@ -32,5 +32,5 @@ jobs:
       - name: Upload Binary Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: s4
-          path: server/target/release/s4/s4
+          name: S4
+          path: server/target/release/S4
