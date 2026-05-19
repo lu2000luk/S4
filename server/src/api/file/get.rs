@@ -172,6 +172,8 @@ impl CloneForRequest for Config {
             allow_query_override_default: Some(self.allow_query_override_default()),
             allow_query_override_db: Some(self.allow_query_override_db()),
             remote_allow_local: Some(self.remote_allow_local()),
+            startup_sync: Some(self.startup_sync()),
+            auto_sync: Some(self.auto_sync()),
         }
     }
 }
@@ -438,6 +440,8 @@ mod tests {
                 allow_query_override_default: Some(true),
                 allow_query_override_db: Some(true),
                 remote_allow_local: Some(true),
+                startup_sync: Some(false),
+                auto_sync: Some(false),
             });
         }
 

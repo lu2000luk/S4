@@ -25,6 +25,7 @@ url = "2.5.7"
 data-url = "0.3.2"
 suppaftp = { version = "8.0.3", features = ["tokio"] }
 git2 = "0.20.2"
+notify = "8.2.0"
 
 [dev-dependencies]
 tempfile = "3.23.0"

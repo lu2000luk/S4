@@ -15,6 +15,8 @@ pub struct Config {
     pub(crate) allow_query_override_default: Option<bool>,
     pub(crate) allow_query_override_db: Option<bool>,
     pub(crate) remote_allow_local: Option<bool>,
+    pub(crate) startup_sync: Option<bool>,
+    pub(crate) auto_sync: Option<bool>,
 }
 
 impl Config {
@@ -62,6 +64,14 @@ impl Config {
         self.remote_allow_local.unwrap_or(false)
     }
 
+    pub fn startup_sync(&self) -> bool {
+        self.startup_sync.unwrap_or(true)
+    }
+
+    pub fn auto_sync(&self) -> bool {
+        self.auto_sync.unwrap_or(true)
+    }
+
     pub fn defaulted() -> Self {
         Config {
             host: Some("127.0.0.1".to_string()),
@@ -75,6 +85,8 @@ impl Config {
             allow_query_override_default: Some(true),
             allow_query_override_db: Some(true),
             remote_allow_local: Some(false),
+            startup_sync: Some(true),
+            auto_sync: Some(true),
         }
     }
 }
@@ -117,6 +129,8 @@ mod tests {
             allow_query_override_default: None,
             allow_query_override_db: None,
             remote_allow_local: None,
+            startup_sync: None,
+            auto_sync: None,
         };
 
         assert_eq!(config.host(), "127.0.0.1");
@@ -130,5 +144,7 @@ mod tests {
         assert!(config.allow_query_override_default());
         assert!(config.allow_query_override_db());
         assert!(!config.remote_allow_local());
+        assert!(config.startup_sync());
+        assert!(config.auto_sync());
     }
 }

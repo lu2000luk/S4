@@ -14,6 +14,7 @@ extern crate rocket;
 
 mod api;
 mod config;
+mod file_watcher;
 mod logger;
 mod utils;
 
@@ -57,6 +58,8 @@ async fn main() {
     let mount = config_ref.mount().to_string();
     let port = config_ref.port();
     let host = config_ref.host().to_string();
+    let startup_sync = config_ref.startup_sync();
+    let auto_sync = config_ref.auto_sync();
     drop(config);
 
     log("Creating database connection pool...");
@@ -65,9 +68,19 @@ async fn main() {
 
     db_integrity(&pool).await;
 
+    if startup_sync {
+        log("Startup sync enabled. Scanning files directory...");
+        sync_files_from_disk(&pool, &mount);
+        success("File sync completed.");
+    }
+
+    if auto_sync {
+        file_watcher::start_file_watcher(pool.clone(), mount.clone());
+    }
+
     let args: Vec<String> = env::args().collect();
     if args.iter().any(|a| a == "--sync") {
-        log("Sync mode enabled. Scanning files directory...");
+        log("Sync mode enabled via flag. Scanning files directory...");
         sync_files_from_disk(&pool, &mount);
         success("File sync completed.");
     }
