@@ -1,6 +1,7 @@
 use std::{
     collections::HashMap,
     io::{self, Cursor, SeekFrom},
+    net::IpAddr,
     path::{Component, Path, PathBuf},
     pin::Pin,
     task::{Context, Poll},
@@ -589,9 +590,64 @@ async fn attach_cache_writer(
     Ok(resolved)
 }
 
+fn is_local_or_private_ip(host: &str) -> bool {
+    if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+        return true;
+    }
+
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        match ip {
+            IpAddr::V4(ipv4) => {
+                return ipv4.is_loopback() || ipv4.is_private() || ipv4.is_link_local();
+            }
+            IpAddr::V6(ipv6) => {
+                return ipv6.is_loopback();
+            }
+        }
+    }
+
+    if host.starts_with("127.") || host.starts_with("10.") || host.starts_with("192.168.") {
+        return true;
+    }
+
+    if let Some(octet) = host.split('.').next().and_then(|s| s.parse::<u8>().ok()) {
+        if octet >= 172 {
+            if let Some(second) = host.split('.').nth(1).and_then(|s| s.parse::<u8>().ok()) {
+                if second >= 16 && second <= 31 {
+                    return true;
+                }
+            }
+        }
+    }
+
+    false
+}
+
+fn validate_remote_not_local(source_path: &str, config: &Config) -> Result<(), FileResolveError> {
+    if config.remote_allow_local() {
+        return Ok(());
+    }
+
+    let url = Url::parse(source_path)
+        .map_err(|e| FileResolveError::BadRequest(format!("invalid URL: {e}")))?;
+
+    let host = url
+        .host_str()
+        .ok_or_else(|| FileResolveError::BadRequest("URL missing host".to_string()))?;
+
+    if is_local_or_private_ip(host) {
+        return Err(FileResolveError::Forbidden(
+            "access to local/private IPs is not allowed for remote sources".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 async fn fetch_http_uncached(
     request: FileResolveRequest<'_>,
 ) -> Result<ResolvedFile, FileResolveError> {
+    validate_remote_not_local(&request.source_path, request.config)?;
     let url = Url::parse(&request.source_path)
         .map_err(|e| FileResolveError::BadRequest(format!("invalid URL: {e}")))?;
     if !matches!(url.scheme(), "http" | "https") {
@@ -666,6 +722,7 @@ async fn fetch_http_uncached(
 async fn fetch_ftp_uncached(
     request: FileResolveRequest<'_>,
 ) -> Result<ResolvedFile, FileResolveError> {
+    validate_remote_not_local(&request.source_path, request.config)?;
     let url = Url::parse(&request.source_path)
         .map_err(|e| FileResolveError::BadRequest(format!("invalid FTP URL: {e}")))?;
     if url.scheme() != "ftp" {
@@ -738,6 +795,7 @@ fn classify_ftp_error(error: String) -> FileResolveError {
 async fn fetch_git_uncached(
     request: FileResolveRequest<'_>,
 ) -> Result<ResolvedFile, FileResolveError> {
+    validate_remote_not_local(&request.source_path, request.config)?;
     let (repo_url, file_path) = parse_git_source(&request.source_path)?;
     let filename = filename_from_path(&file_path);
     let tmp = Path::new(request.config.mount())

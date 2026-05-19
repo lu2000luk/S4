@@ -14,6 +14,7 @@ pub struct Config {
     pub(crate) remove_not_found_files: Option<bool>,
     pub(crate) allow_query_override_default: Option<bool>,
     pub(crate) allow_query_override_db: Option<bool>,
+    pub(crate) remote_allow_local: Option<bool>,
 }
 
 impl Config {
@@ -57,6 +58,10 @@ impl Config {
         self.allow_query_override_db.unwrap_or(true)
     }
 
+    pub fn remote_allow_local(&self) -> bool {
+        self.remote_allow_local.unwrap_or(false)
+    }
+
     pub fn defaulted() -> Self {
         Config {
             host: Some("127.0.0.1".to_string()),
@@ -69,6 +74,7 @@ impl Config {
             remove_not_found_files: Some(false),
             allow_query_override_default: Some(true),
             allow_query_override_db: Some(true),
+            remote_allow_local: Some(false),
         }
     }
 }
@@ -110,6 +116,7 @@ mod tests {
             remove_not_found_files: None,
             allow_query_override_default: None,
             allow_query_override_db: None,
+            remote_allow_local: None,
         };
 
         assert_eq!(config.host(), "127.0.0.1");
@@ -122,5 +129,6 @@ mod tests {
         assert!(!config.remove_not_found_files());
         assert!(config.allow_query_override_default());
         assert!(config.allow_query_override_db());
+        assert!(!config.remote_allow_local());
     }
 }

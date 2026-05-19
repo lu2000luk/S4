@@ -171,6 +171,7 @@ impl CloneForRequest for Config {
             remove_not_found_files: Some(self.remove_not_found_files()),
             allow_query_override_default: Some(self.allow_query_override_default()),
             allow_query_override_db: Some(self.allow_query_override_db()),
+            remote_allow_local: Some(self.remote_allow_local()),
         }
     }
 }
@@ -188,7 +189,7 @@ async fn load_file_row(
         })?;
 
         conn.query_row(
-            "SELECT id, path, metadata, type, mime_type, size, link, link_target, cache, cache_dur, sync_on, sync_interval, last_synced, created_at, updated_at FROM files WHERE path = ?",
+            "SELECT id, path, metadata, type, mime_type, size, link, link_target, cache, cache_dur, created_at, updated_at FROM files WHERE path = ?",
             params![normalized_path],
             |row| {
                 let metadata: Option<String> = row.get(2)?;
@@ -205,11 +206,8 @@ async fn load_file_row(
                     link_target: row.get(7)?,
                     cache: row.get(8)?,
                     cache_dur: row.get(9)?,
-                    sync_on: row.get(10)?,
-                    sync_interval: row.get(11)?,
-                    last_synced: row.get(12)?,
-                    created_at: row.get(13)?,
-                    updated_at: row.get(14)?,
+                    created_at: row.get(10)?,
+                    updated_at: row.get(11)?,
                 })
             },
         )
@@ -439,6 +437,7 @@ mod tests {
                 remove_not_found_files: Some(false),
                 allow_query_override_default: Some(true),
                 allow_query_override_db: Some(true),
+                remote_allow_local: Some(true),
             });
         }
 

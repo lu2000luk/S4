@@ -7,9 +7,6 @@ INSERT INTO files (
     size,
     link,
     link_target,
-    sync_on,
-    sync_interval,
-    last_synced,
     created_at,
     updated_at
 ) VALUES (
@@ -21,9 +18,6 @@ INSERT INTO files (
     0,
     'local',
     '/',
-    'manual',
-    NULL,
-    NULL,
     CURRENT_TIMESTAMP,
     CURRENT_TIMESTAMP
 );

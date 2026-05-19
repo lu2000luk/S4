@@ -1,9 +1,10 @@
 pub use s4_macros as authenticated;
 
-use crate::logger::{ascii, log, success};
+use crate::logger::{ascii, log, success, warn};
 use duckdb::DuckdbConnectionManager;
 use r2d2::Pool;
 use rocket::response::Redirect;
+use std::env;
 use std::fs;
 use std::path::Path;
 use std::sync::{Arc, LazyLock, Mutex};
@@ -63,6 +64,13 @@ async fn main() {
     let pool = create_db_pool(&db_path);
 
     db_integrity(&pool).await;
+
+    let args: Vec<String> = env::args().collect();
+    if args.iter().any(|a| a == "--sync") {
+        log("Sync mode enabled. Scanning files directory...");
+        sync_files_from_disk(&pool, &mount);
+        success("File sync completed.");
+    }
 
     log("Building server...");
     let api = rocket::build()
@@ -140,5 +148,119 @@ pub fn create_path_recursive(relative_path_to_exec: Option<String>) {
         fs::create_dir_all(path2).expect("Failed to create directories (files)");
         let path3 = Path::new(&backups_path_str);
         fs::create_dir_all(path3).expect("Failed to create directories (backups)");
+    }
+}
+
+fn generate_file_id() -> String {
+    use base64::Engine;
+    use rand::{Rng, distr::Alphanumeric, rng};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let random_part: String = rng()
+        .sample_iter(&Alphanumeric)
+        .take(16)
+        .map(char::from)
+        .collect();
+
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time before UNIX_EPOCH")
+        .as_secs()
+        .to_string();
+
+    let ts_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(ts.as_bytes());
+
+    format!("f.{}.{}", random_part, ts_b64)
+}
+
+fn generate_perm_id() -> String {
+    use base64::Engine;
+    use rand::{Rng, distr::Alphanumeric, rng};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    let random_part: String = rng()
+        .sample_iter(&Alphanumeric)
+        .take(16)
+        .map(char::from)
+        .collect();
+
+    let ts = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time before UNIX_EPOCH")
+        .as_secs()
+        .to_string();
+
+    let ts_b64 = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(ts.as_bytes());
+
+    format!("fp.{}.{}", random_part, ts_b64)
+}
+
+pub fn sync_files_from_disk(pool: &DbPool, mount: &str) {
+    let files_dir = Path::new(mount).join("files");
+    if !files_dir.exists() {
+        warn("Files directory does not exist, skipping sync.");
+        return;
+    }
+
+    let conn = pool.get().expect("Failed to get connection from pool");
+
+    let mut entries: Vec<(String, bool)> = Vec::new();
+    collect_entries(&files_dir, &files_dir, &mut entries);
+
+    let mut created_files = 0;
+    let mut created_perms = 0;
+
+    for (virtual_path, is_dir) in &entries {
+        let exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
+            .unwrap_or(0);
+
+        if exists == 0 {
+            let file_id = generate_file_id();
+            let file_type = if *is_dir { "folder" } else { "file" };
+            let link_target = virtual_path.trim_start_matches('/');
+
+            let metadata = if *is_dir { "{}" } else { "{}" };
+
+            conn.execute(
+                "INSERT INTO files (id, path, metadata, type, mime_type, size, link, link_target, cache, cache_dur, created_at, updated_at) VALUES (?, ?, ?, ?, NULL, 0, 'local', ?, FALSE, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)",
+                duckdb::params![file_id, virtual_path, metadata, file_type, link_target],
+            ).expect("Failed to insert file entry");
+
+            created_files += 1;
+
+            let perm_id = generate_perm_id();
+            conn.execute(
+                "INSERT INTO file_perms (id, permission_id, path, recursive, read, created_at) VALUES (?, 'everyone', ?, ?, TRUE, CURRENT_TIMESTAMP)",
+                duckdb::params![perm_id, virtual_path, is_dir],
+            ).expect("Failed to insert file permission");
+
+            created_perms += 1;
+        }
+    }
+
+    log(&format!("Synced {} files/folders, created {} permissions.", created_files, created_perms));
+}
+
+fn collect_entries(base: &Path, dir: &Path, entries: &mut Vec<(String, bool)>) {
+    if let Ok(read_dir) = fs::read_dir(dir) {
+        for entry_result in read_dir {
+            if let Ok(entry) = entry_result {
+                let path = entry.path();
+                let relative = path.strip_prefix(base).unwrap_or(&path);
+                let virtual_path = format!("/{}", relative.to_string_lossy().replace('\\', "/"));
+
+                if path.is_dir() {
+                    entries.push((virtual_path.clone(), true));
+                    collect_entries(base, &path, entries);
+                } else {
+                    entries.push((virtual_path, false));
+                }
+            }
+        }
     }
 }

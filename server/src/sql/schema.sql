@@ -65,9 +65,6 @@ CREATE TABLE IF NOT EXISTS files (
     link_target VARCHAR,
     cache BOOLEAN NOT NULL DEFAULT FALSE,
     cache_dur BIGINT NOT NULL DEFAULT 0,
-    sync_on VARCHAR NOT NULL CHECK (sync_on IN ('view', 'manual', 'interval')) DEFAULT 'manual',
-    sync_interval INTEGER,
-    last_synced TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

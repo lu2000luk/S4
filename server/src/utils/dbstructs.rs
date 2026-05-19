@@ -60,9 +60,6 @@ pub struct File {
     pub link_target: Option<String>,
     pub cache: bool,
     pub cache_dur: i64,
-    pub sync_on: String,
-    pub sync_interval: Option<i32>,
-    pub last_synced: Option<chrono::NaiveDateTime>,
     pub created_at: chrono::NaiveDateTime,
     pub updated_at: chrono::NaiveDateTime,
 }
