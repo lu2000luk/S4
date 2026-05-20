@@ -26,6 +26,7 @@ size int
     cache_dur int (milliseconds)
 
 TABLE permissions
+id string
 weight int
 isRoot boolean
 create_api_key boolean

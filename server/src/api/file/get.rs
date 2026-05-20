@@ -427,22 +427,13 @@ mod tests {
         crate::create_path_recursive(Some(mount.clone()));
 
         {
+            let mut config = Config::defaulted();
+            config.mount = Some(mount.clone());
+            config.remote_allow_local = Some(true);
+            config.startup_sync = Some(false);
+            config.auto_sync = Some(false);
             let mut guard = CONFIG.lock().unwrap();
-            guard.replace(Config {
-                host: Some("127.0.0.1".to_string()),
-                port: Some(8080),
-                mount: Some(mount.clone()),
-                can_unauthenticated_cache: Some(true),
-                max_cache_entry_size: Some(104_857_600),
-                total_max_cache: Some(1_073_741_824),
-                default_use_cache: Some(true),
-                remove_not_found_files: Some(false),
-                allow_query_override_default: Some(true),
-                allow_query_override_db: Some(true),
-                remote_allow_local: Some(true),
-                startup_sync: Some(false),
-                auto_sync: Some(false),
-            });
+            guard.replace(config);
         }
 
         let db_path = temp.path().join("s4.db");
@@ -450,6 +441,16 @@ mod tests {
         crate::db_integrity(&pool).await;
         {
             let conn = pool.get().unwrap();
+            conn.execute(
+                "INSERT OR IGNORE INTO permissions (id, weight, is_root) VALUES ('everyone', 0, FALSE)",
+                [],
+            )
+            .unwrap();
+            conn.execute(
+                "INSERT OR IGNORE INTO users (id, username, password_hash, is_everyone, permission_id) VALUES ('everyone', 'everyone', '', TRUE, 'everyone')",
+                [],
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO file_perms (id, permission_id, path, recursive, read) VALUES ('everyone_allowed', 'everyone', '/allowed', TRUE, TRUE)",
                 [],
@@ -502,7 +503,7 @@ mod tests {
         let rocket = rocket::build()
             .manage(pool.clone())
             .mount("/api", routes![get_file]);
-        let client = Client::tracked(rocket).await.unwrap();
+        let client = Client::untracked(rocket).await.unwrap();
 
         TestServer {
             _temp: temp,

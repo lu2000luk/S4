@@ -628,14 +628,30 @@ fn validate_remote_not_local(source_path: &str, config: &Config) -> Result<(), F
         return Ok(());
     }
 
-    let url = Url::parse(source_path)
-        .map_err(|e| FileResolveError::BadRequest(format!("invalid URL: {e}")))?;
+    let url_result = Url::parse(source_path);
 
-    let host = url
-        .host_str()
-        .ok_or_else(|| FileResolveError::BadRequest("URL missing host".to_string()))?;
+    let host = match url_result {
+        Ok(url) => url.host_str().map(|s| s.to_string()),
+        Err(_) => {
+            if let Some((user_host, _)) = source_path.split_once(':') {
+                if !user_host.contains('/') {
+                    if let Some((_, host)) = user_host.split_once('@') {
+                        Some(host.to_string())
+                    } else {
+                        Some(user_host.to_string())
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        }
+    };
 
-    if is_local_or_private_ip(host) {
+    let host = host.ok_or_else(|| FileResolveError::BadRequest("URL missing host".to_string()))?;
+
+    if is_local_or_private_ip(&host) {
         return Err(FileResolveError::Forbidden(
             "access to local/private IPs is not allowed for remote sources".to_string(),
         ));
@@ -839,6 +855,114 @@ fn parse_git_source(source: &str) -> Result<(String, String), FileResolveError> 
     ))
 }
 
+fn ssh_to_https_url(url: &str) -> Option<String> {
+    if url.starts_with("http://") || url.starts_with("https://") {
+        return None;
+    }
+
+    if url.starts_with("ssh://") {
+        if let Some(without_scheme) = url.strip_prefix("ssh://") {
+            let without_user = without_scheme.strip_prefix("git@").unwrap_or(without_scheme);
+            return Some(format!("https://{}", without_user));
+        }
+    }
+    
+    let without_user = if let Some((_user, host_path)) = url.split_once('@') {
+        host_path
+    } else {
+        url
+    };
+    
+    if let Some((host, path)) = without_user.split_once(':') {
+        if host.len() > 1 && !host.contains('/') && !host.contains('\\') {
+            return Some(format!("https://{}/{}", host, path));
+        }
+    }
+    
+    None
+}
+
+fn attempt_clone(repo_url: &str, repo_dir: &Path) -> Result<git2::Repository, FileResolveError> {
+    let mut callbacks = git2::RemoteCallbacks::new();
+    callbacks.certificate_check(|_cert, _valid| Ok(git2::CertificateCheckStatus::CertificateOk));
+    let mut attempts = 0;
+    callbacks.credentials(move |url, username_from_url, _allowed_types| {
+        if url.starts_with("http://") || url.starts_with("https://") {
+            return git2::Cred::default();
+        }
+
+        let username = username_from_url.unwrap_or("git");
+        let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
+        
+        let mut keys = Vec::new();
+        if !home.is_empty() {
+            let base = std::path::Path::new(&home).join(".ssh");
+            for key_name in &["id_ed25519", "id_rsa", "id_ecdsa"] {
+                let path = base.join(key_name);
+                if path.exists() {
+                    keys.push(path);
+                }
+            }
+        }
+
+        while attempts < keys.len() {
+            let key = &keys[attempts];
+            attempts += 1;
+            match git2::Cred::ssh_key(username, None, key, None) {
+                Ok(cred) => return Ok(cred),
+                Err(_) => continue,
+            }
+        }
+        
+        let after_keys = attempts - keys.len();
+        attempts += 1;
+
+        if after_keys == 0 {
+            match git2::Cred::ssh_key_from_agent(username) {
+                Ok(cred) => return Ok(cred),
+                Err(_) => attempts += 1,
+            }
+        }
+        
+        if after_keys <= 1 {
+            match git2::Cred::default() {
+                Ok(cred) => return Ok(cred),
+                Err(_) => {}
+            }
+        }
+
+        Err(git2::Error::from_str("Exhausted authentication methods"))
+    });
+
+    let mut fetch_options = git2::FetchOptions::new();
+    fetch_options.remote_callbacks(callbacks);
+
+    let mut builder = git2::build::RepoBuilder::new();
+    builder.fetch_options(fetch_options);
+
+    builder.clone(repo_url, repo_dir)
+        .map_err(|e| FileResolveError::UpstreamFailure(e.message().to_string()))
+}
+
+fn attempt_clone_with_timeout(repo_url: &str, repo_dir: &Path) -> Result<git2::Repository, FileResolveError> {
+    use std::sync::mpsc::{channel, RecvTimeoutError};
+    use std::time::Duration;
+
+    let (tx, rx) = channel();
+    let url = repo_url.to_string();
+    let dir = repo_dir.to_path_buf();
+    std::thread::spawn(move || {
+        let result = attempt_clone(&url, &dir);
+        let _ = tx.send(result);
+    });
+
+    match rx.recv_timeout(Duration::from_millis(2500)) {
+        Ok(res) => res,
+        Err(RecvTimeoutError::Timeout) => Err(FileResolveError::UpstreamFailure("Git clone timed out".to_string())),
+        Err(RecvTimeoutError::Disconnected) => Err(FileResolveError::UpstreamFailure("Git clone thread failed".to_string())),
+    }
+}
+
 fn materialize_git_file(
     repo_url: &str,
     file_path: &str,
@@ -849,8 +973,35 @@ fn materialize_git_file(
         .ok_or_else(|| FileResolveError::InternalFailure("missing temp parent".to_string()))?;
     let repo_dir = tmp_parent.join(format!("repo-{}", cache_key(repo_url)));
     let _ = std::fs::remove_dir_all(&repo_dir);
-    let repo = git2::Repository::clone(repo_url, &repo_dir)
-        .map_err(|e| FileResolveError::UpstreamFailure(e.message().to_string()))?;
+
+    let clone_result = attempt_clone_with_timeout(repo_url, &repo_dir);
+
+    let repo = match clone_result {
+        Ok(repo) => repo,
+        Err(e) => {
+            if let Some(https_url) = ssh_to_https_url(repo_url) {
+                let _ = std::fs::remove_dir_all(&repo_dir);
+                match attempt_clone_with_timeout(&https_url, &repo_dir) {
+                    Ok(repo) => repo,
+                    Err(_) => {
+                        return Err(FileResolveError::NotFoundDefinite(
+                            "Git repository not found or authentication failed".to_string(),
+                        ));
+                    }
+                }
+            } else {
+                return Err(FileResolveError::NotFoundDefinite(format!(
+                    "Git repository not found: {}",
+                    match e {
+                        FileResolveError::UpstreamFailure(msg) => msg,
+                        _ => "clone failed".to_string(),
+                    }
+                )));
+            }
+        }
+    };
+
+
     let head = repo
         .head()
         .map_err(|e| FileResolveError::UpstreamFailure(e.message().to_string()))?;

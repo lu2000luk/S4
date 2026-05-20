@@ -2,7 +2,7 @@ use crate::logger::{warn, log};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 pub struct Config {
     pub(crate) host: Option<String>,
     pub(crate) port: Option<u16>,
@@ -73,21 +73,21 @@ impl Config {
     }
 
     pub fn defaulted() -> Self {
-        Config {
-            host: Some("127.0.0.1".to_string()),
-            port: Some(8080),
-            mount: Some("./data/".to_string()),
-            can_unauthenticated_cache: Some(true),
-            max_cache_entry_size: Some(104_857_600),
-            total_max_cache: Some(1_073_741_824),
-            default_use_cache: Some(true),
-            remove_not_found_files: Some(false),
-            allow_query_override_default: Some(true),
-            allow_query_override_db: Some(true),
-            remote_allow_local: Some(false),
-            startup_sync: Some(true),
-            auto_sync: Some(true),
-        }
+        let mut config = Self::default();
+        config.host = Some("127.0.0.1".to_string());
+        config.port = Some(8080);
+        config.mount = Some("./data/".to_string());
+        config.can_unauthenticated_cache = Some(true);
+        config.max_cache_entry_size = Some(104_857_600);
+        config.total_max_cache = Some(1_073_741_824);
+        config.default_use_cache = Some(true);
+        config.remove_not_found_files = Some(false);
+        config.allow_query_override_default = Some(true);
+        config.allow_query_override_db = Some(true);
+        config.remote_allow_local = Some(false);
+        config.startup_sync = Some(true);
+        config.auto_sync = Some(true);
+        config
     }
 }
 

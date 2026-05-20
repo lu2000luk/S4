@@ -103,7 +103,8 @@ async fn main() {
                 api::user_key::user_key_delete_body,
                 api::check_auth::check_auth,
                 api::check_auth::check_auth_post,
-                api::file::get::get_file
+                api::file::get::get_file,
+                api::file::post::create_file
             ],
         )
         .mount("/", routes![redir_api, redir_api_all]);
@@ -256,7 +257,10 @@ pub fn sync_files_from_disk(pool: &DbPool, mount: &str) {
         }
     }
 
-    log(&format!("Synced {} files/folders, created {} permissions.", created_files, created_perms));
+    log(&format!(
+        "Synced {} files/folders, created {} permissions.",
+        created_files, created_perms
+    ));
 }
 
 fn collect_entries(base: &Path, dir: &Path, entries: &mut Vec<(String, bool)>) {

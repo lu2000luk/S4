@@ -318,7 +318,7 @@ mod tests {
     fn test_handle_event_create_file() {
         let (pool, temp) = test_pool();
         let mount = temp.path().to_str().unwrap().to_string();
-        let files_dir = PathBuf::from(&mount).join("files");
+        let files_dir = PathBuf::from(&mount).join("files").canonicalize().unwrap();
 
         let new_file = files_dir.join("new-test.txt");
         fs::write(&new_file, "content").unwrap();
@@ -342,7 +342,7 @@ mod tests {
     fn test_handle_event_remove_file() {
         let (pool, temp) = test_pool();
         let mount = temp.path().to_str().unwrap().to_string();
-        let files_dir = PathBuf::from(&mount).join("files");
+        let files_dir = PathBuf::from(&mount).join("files").canonicalize().unwrap();
 
         let conn = pool.get().unwrap();
         super::sync_entry(&conn, "/existing.txt", false);
@@ -367,7 +367,7 @@ mod tests {
     #[test]
     fn test_handle_event_ignores_s4_and_backups() {
         let (pool, temp) = test_pool();
-        let files_dir = PathBuf::from(temp.path()).join("files");
+        let files_dir = PathBuf::from(temp.path()).join("files").canonicalize().unwrap();
 
         let s4_path = files_dir.join(".s4");
         fs::create_dir_all(&s4_path).unwrap();
