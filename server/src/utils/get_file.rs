@@ -862,23 +862,25 @@ fn ssh_to_https_url(url: &str) -> Option<String> {
 
     if url.starts_with("ssh://") {
         if let Some(without_scheme) = url.strip_prefix("ssh://") {
-            let without_user = without_scheme.strip_prefix("git@").unwrap_or(without_scheme);
+            let without_user = without_scheme
+                .strip_prefix("git@")
+                .unwrap_or(without_scheme);
             return Some(format!("https://{}", without_user));
         }
     }
-    
+
     let without_user = if let Some((_user, host_path)) = url.split_once('@') {
         host_path
     } else {
         url
     };
-    
+
     if let Some((host, path)) = without_user.split_once(':') {
         if host.len() > 1 && !host.contains('/') && !host.contains('\\') {
             return Some(format!("https://{}/{}", host, path));
         }
     }
-    
+
     None
 }
 
@@ -892,8 +894,10 @@ fn attempt_clone(repo_url: &str, repo_dir: &Path) -> Result<git2::Repository, Fi
         }
 
         let username = username_from_url.unwrap_or("git");
-        let home = std::env::var("USERPROFILE").or_else(|_| std::env::var("HOME")).unwrap_or_default();
-        
+        let home = std::env::var("USERPROFILE")
+            .or_else(|_| std::env::var("HOME"))
+            .unwrap_or_default();
+
         let mut keys = Vec::new();
         if !home.is_empty() {
             let base = std::path::Path::new(&home).join(".ssh");
@@ -913,7 +917,7 @@ fn attempt_clone(repo_url: &str, repo_dir: &Path) -> Result<git2::Repository, Fi
                 Err(_) => continue,
             }
         }
-        
+
         let after_keys = attempts - keys.len();
         attempts += 1;
 
@@ -923,7 +927,7 @@ fn attempt_clone(repo_url: &str, repo_dir: &Path) -> Result<git2::Repository, Fi
                 Err(_) => attempts += 1,
             }
         }
-        
+
         if after_keys <= 1 {
             match git2::Cred::default() {
                 Ok(cred) => return Ok(cred),
@@ -940,12 +944,16 @@ fn attempt_clone(repo_url: &str, repo_dir: &Path) -> Result<git2::Repository, Fi
     let mut builder = git2::build::RepoBuilder::new();
     builder.fetch_options(fetch_options);
 
-    builder.clone(repo_url, repo_dir)
+    builder
+        .clone(repo_url, repo_dir)
         .map_err(|e| FileResolveError::UpstreamFailure(e.message().to_string()))
 }
 
-fn attempt_clone_with_timeout(repo_url: &str, repo_dir: &Path) -> Result<git2::Repository, FileResolveError> {
-    use std::sync::mpsc::{channel, RecvTimeoutError};
+fn attempt_clone_with_timeout(
+    repo_url: &str,
+    repo_dir: &Path,
+) -> Result<git2::Repository, FileResolveError> {
+    use std::sync::mpsc::{RecvTimeoutError, channel};
     use std::time::Duration;
 
     let (tx, rx) = channel();
@@ -958,8 +966,12 @@ fn attempt_clone_with_timeout(repo_url: &str, repo_dir: &Path) -> Result<git2::R
 
     match rx.recv_timeout(Duration::from_millis(2500)) {
         Ok(res) => res,
-        Err(RecvTimeoutError::Timeout) => Err(FileResolveError::UpstreamFailure("Git clone timed out".to_string())),
-        Err(RecvTimeoutError::Disconnected) => Err(FileResolveError::UpstreamFailure("Git clone thread failed".to_string())),
+        Err(RecvTimeoutError::Timeout) => Err(FileResolveError::UpstreamFailure(
+            "Git clone timed out".to_string(),
+        )),
+        Err(RecvTimeoutError::Disconnected) => Err(FileResolveError::UpstreamFailure(
+            "Git clone thread failed".to_string(),
+        )),
     }
 }
 
@@ -1000,7 +1012,6 @@ fn materialize_git_file(
             }
         }
     };
-
 
     let head = repo
         .head()

@@ -174,6 +174,8 @@ impl CloneForRequest for Config {
             remote_allow_local: Some(self.remote_allow_local()),
             startup_sync: Some(self.startup_sync()),
             auto_sync: Some(self.auto_sync()),
+            max_compression_upload: Some(self.max_compression_upload()),
+            ignore_errors: Some(self.ignore_errors()),
         }
     }
 }
@@ -419,9 +421,11 @@ mod tests {
         _temp: tempfile::TempDir,
         pool: DbPool,
         client: Client,
+        _config_guard: std::sync::MutexGuard<'static, ()>,
     }
 
     async fn test_server() -> TestServer {
+        let config_guard = crate::test_config_lock();
         let temp = tempfile::tempdir().unwrap();
         let mount = temp.path().to_str().unwrap().to_string();
         crate::create_path_recursive(Some(mount.clone()));
@@ -509,6 +513,7 @@ mod tests {
             _temp: temp,
             pool,
             client,
+            _config_guard: config_guard,
         }
     }
 

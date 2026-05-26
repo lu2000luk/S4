@@ -9,7 +9,11 @@ use rocket::serde::{Deserialize, Serialize, json::Json};
 use s4_macros::post;
 
 use crate::{
-    DbPool,
+    CONFIG, DbPool,
+    utils::pstr::{
+        JsonResponseWithWarning, ParsedPermissionString, PermissionStringHeaders,
+        PermissionStringQuery, insert_permission_string_entries, parse_creation_permission_string,
+    },
     utils::permissions::{
         FilePermType, FilePermission, PermissionEngine, load_engine_sync, perms_from_key_sync,
     },
@@ -122,7 +126,8 @@ fn create_file_impl(
     provided_type: Option<String>,
     permissions: Option<std::collections::HashMap<String, FilePermsInput>>,
     pool: &DbPool,
-) -> Result<String, status::Custom<String>> {
+    permission_string: Option<ParsedPermissionString>,
+) -> Result<JsonResponseWithWarning, status::Custom<String>> {
     if source.is_empty() {
         return Err(status::Custom(
             Status::BadRequest,
@@ -235,56 +240,63 @@ fn create_file_impl(
         ));
     }
 
-    // Prepare permissions map with default "everyone" read permission
-    let mut perms_map = permissions.unwrap_or_default();
-    
-    // Ensure "everyone" has read permission by default (unless explicitly set in request body)
-    perms_map.entry("everyone".to_string())
-        .or_insert_with(|| FilePermsInput {
-            bypass_weight: None,
-            recursive: None,
-            read: Some(true),
-            delete: None,
-            write: None,
-            create_file: None,
-            create_folder: None,
-            create_link: None,
-            create_backup: None,
-            create_with_weight: None,
-            generate_link: None,
-            encrypt: None,
-        });
+    let warning = if let Some(permission_string) = permission_string {
+        insert_permission_string_entries(&conn, &normalized_path, &permission_string.entries)?;
+        permission_string.warning
+    } else {
+        // Prepare permissions map with default "everyone" read permission
+        let mut perms_map = permissions.unwrap_or_default();
 
-    let perm_insert_query = r#"
-        INSERT INTO file_perms (
-            id, permission_id, path, bypass_weight, recursive, read, delete, write,
-            create_file, create_folder, create_link, create_backup, create_with_weight,
-            generate_link, encrypt, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-    "#;
-    for (perm_id, p_input) in perms_map {
-        let fp_id = generate_file_id();
-        let _ = conn.execute(
-            perm_insert_query,
-            params![
-                fp_id,
-                perm_id,
-                normalized_path.clone(),
-                p_input.bypass_weight.unwrap_or(false),
-                p_input.recursive.unwrap_or(false),
-                p_input.read.unwrap_or(false),
-                p_input.delete.unwrap_or(false),
-                p_input.write.unwrap_or(false),
-                p_input.create_file.unwrap_or(false),
-                p_input.create_folder.unwrap_or(false),
-                p_input.create_link.unwrap_or(false),
-                p_input.create_backup.unwrap_or(false),
-                p_input.create_with_weight.unwrap_or(false),
-                p_input.generate_link.unwrap_or(false),
-                p_input.encrypt.unwrap_or(false),
-            ],
-        );
-    }
+        // Ensure "everyone" has read permission by default (unless explicitly set in request body)
+        perms_map
+            .entry("everyone".to_string())
+            .or_insert_with(|| FilePermsInput {
+                bypass_weight: None,
+                recursive: None,
+                read: Some(true),
+                delete: None,
+                write: None,
+                create_file: None,
+                create_folder: None,
+                create_link: None,
+                create_backup: None,
+                create_with_weight: None,
+                generate_link: None,
+                encrypt: None,
+            });
+
+        let perm_insert_query = r#"
+            INSERT INTO file_perms (
+                id, permission_id, path, bypass_weight, recursive, read, delete, write,
+                create_file, create_folder, create_link, create_backup, create_with_weight,
+                generate_link, encrypt, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        "#;
+        for (perm_id, p_input) in perms_map {
+            let fp_id = generate_file_id();
+            let _ = conn.execute(
+                perm_insert_query,
+                params![
+                    fp_id,
+                    perm_id,
+                    normalized_path.clone(),
+                    p_input.bypass_weight.unwrap_or(false),
+                    p_input.recursive.unwrap_or(false),
+                    p_input.read.unwrap_or(false),
+                    p_input.delete.unwrap_or(false),
+                    p_input.write.unwrap_or(false),
+                    p_input.create_file.unwrap_or(false),
+                    p_input.create_folder.unwrap_or(false),
+                    p_input.create_link.unwrap_or(false),
+                    p_input.create_backup.unwrap_or(false),
+                    p_input.create_with_weight.unwrap_or(false),
+                    p_input.generate_link.unwrap_or(false),
+                    p_input.encrypt.unwrap_or(false),
+                ],
+            );
+        }
+        None
+    };
 
     let response = CreatedFileResponse {
         id: file_id,
@@ -297,7 +309,10 @@ fn create_file_impl(
         size: 0,
     };
 
-    Ok(serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string()))
+    Ok(JsonResponseWithWarning {
+        body: serde_json::to_string(&response).unwrap_or_else(|_| "{}".to_string()),
+        warning,
+    })
 }
 
 fn generate_file_id() -> String {
@@ -322,14 +337,38 @@ fn generate_file_id() -> String {
     format!("f.{}.{}", random_part, ts_b64)
 }
 
-#[post("/file/<path..>", format = "json", data = "<data>")]
+#[post(
+    "/file/<path..>?<permissions>&<permission>&<perms>&<perm>",
+    format = "json",
+    data = "<data>"
+)]
 pub async fn create_file(
     path: std::path::PathBuf,
+    permissions: Option<String>,
+    permission: Option<String>,
+    perms: Option<String>,
+    perm: Option<String>,
+    permission_headers: PermissionStringHeaders,
     data: Json<CreateFileData>,
     auth_key: String,
     pool: &State<DbPool>,
-) -> Result<String, status::Custom<String>> {
+) -> Result<JsonResponseWithWarning, status::Custom<String>> {
     let path_str = path.to_string_lossy().to_string();
+    let query = PermissionStringQuery {
+        permissions,
+        permission,
+        perms,
+        perm,
+    };
+    let ignore_errors = {
+        let guard = CONFIG.lock().unwrap();
+        guard
+            .as_ref()
+            .map(|config| config.ignore_errors())
+            .unwrap_or_else(|| crate::config::Config::defaulted().ignore_errors())
+    };
+    let permission_string =
+        parse_creation_permission_string(query.selected_value(&permission_headers), ignore_errors)?;
 
     let pool = pool.inner().clone();
     rocket::tokio::task::spawn_blocking(move || {
@@ -343,6 +382,7 @@ pub async fn create_file(
             inner_data.r#type,
             inner_data.permissions,
             &pool,
+            permission_string,
         )
     })
     .await
@@ -353,7 +393,7 @@ pub async fn create_file(
 mod tests {
     use super::*;
     use crate::config::Config;
-    use crate::{CONFIG, create_db_pool, db_integrity, create_path_recursive};
+    use crate::{CONFIG, create_db_pool, create_path_recursive, db_integrity};
     use rocket::http::{ContentType, Status};
     use rocket::local::asynchronous::Client;
 
@@ -361,9 +401,11 @@ mod tests {
         _temp: tempfile::TempDir,
         pool: Option<DbPool>,
         client: Client,
+        _config_guard: std::sync::MutexGuard<'static, ()>,
     }
 
     async fn test_server() -> TestServer {
+        let config_guard = crate::test_config_lock();
         let temp = tempfile::tempdir().unwrap();
         let mount = temp.path().to_str().unwrap().to_string();
         create_path_recursive(Some(mount.clone()));
@@ -388,7 +430,11 @@ mod tests {
                 [],
             )
             .unwrap();
-            conn.execute("UPDATE permissions SET is_root = TRUE WHERE id = 'everyone'", []).unwrap();
+            conn.execute(
+                "UPDATE permissions SET is_root = TRUE WHERE id = 'everyone'",
+                [],
+            )
+            .unwrap();
             conn.execute(
                 "INSERT INTO users (id, username, password_hash, is_everyone, permission_id) VALUES ('testuser', 'testuser', '', FALSE, 'testuser')",
                 [],
@@ -425,6 +471,7 @@ mod tests {
             _temp: temp,
             pool: Some(pool),
             client,
+            _config_guard: config_guard,
         }
     }
 
@@ -436,8 +483,12 @@ mod tests {
 
     fn count_files(pool: &DbPool) -> i64 {
         let conn = pool.get().unwrap();
-        conn.query_row("SELECT COUNT(*) FROM files WHERE type = 'file'", [], |row| row.get(0))
-            .unwrap()
+        conn.query_row(
+            "SELECT COUNT(*) FROM files WHERE type = 'file'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap()
     }
 
     #[tokio::test]
@@ -491,7 +542,10 @@ mod tests {
         assert_eq!(json["size"], 0);
         assert!(json["id"].as_str().unwrap().starts_with("f."));
 
-        assert_eq!(count_files(server.pool.as_ref().unwrap()), initial_count + 1);
+        assert_eq!(
+            count_files(server.pool.as_ref().unwrap()),
+            initial_count + 1
+        );
     }
 
     #[tokio::test]

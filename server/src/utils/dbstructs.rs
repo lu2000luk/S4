@@ -17,7 +17,7 @@ pub struct Permissions {
     pub created_at: chrono::NaiveDateTime,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FilePerms {
     pub id: String,
     pub permission_id: String,

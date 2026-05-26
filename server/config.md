@@ -14,6 +14,8 @@ The server reads `config.toml` from the current working directory. Every entry i
 | `remove_not_found_files` | boolean | `false` | When `true`, `/api/file/<path..>` deletes a DB file row after permission checks if the resolver proves the backing source is definitely missing. Dependent `links` rows are deleted first; `backups` rows are kept, and if they block the file delete S4 logs and leaves the row. |
 | `allow_query_override_default` | boolean | `true` | Allows `?cache=` to override `default_use_cache` when no explicit DB cache value applies. |
 | `allow_query_override_db` | boolean | `true` | Allows `?cache=` to override `files.cache`. When `false`, query cache values cannot override the DB row value. |
+| `max_compression_upload` | integer (`u64`) | `104857600` | Maximum size in bytes allowed for a compressed upload before decompression. |
+| `ignore_errors` | boolean | `false` | When `true`, permission-string entries that include an explicit path are ignored during file creation and the successful response includes an `X-Error` header describing the ignored entry. When `false`, explicit paths in permission strings reject the request with `400 Bad Request`. |
 
 ## Cache Decision
 

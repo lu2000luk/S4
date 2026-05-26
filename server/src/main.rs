@@ -7,6 +7,8 @@ use rocket::response::Redirect;
 use std::env;
 use std::fs;
 use std::path::Path;
+#[cfg(test)]
+use std::sync::MutexGuard;
 use std::sync::{Arc, LazyLock, Mutex};
 
 #[macro_use]
@@ -22,6 +24,16 @@ pub type DbPool = Pool<DuckdbConnectionManager>;
 
 static CONFIG: LazyLock<Arc<Mutex<Option<config::Config>>>> =
     LazyLock::new(|| Arc::new(Mutex::new(None)));
+
+#[cfg(test)]
+static TEST_CONFIG_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+#[cfg(test)]
+pub(crate) fn test_config_lock() -> MutexGuard<'static, ()> {
+    TEST_CONFIG_LOCK
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+}
 
 #[get("/")]
 fn version() -> &'static str {
@@ -104,7 +116,8 @@ async fn main() {
                 api::check_auth::check_auth,
                 api::check_auth::check_auth_post,
                 api::file::get::get_file,
-                api::file::post::create_file
+                api::file::post::create_file,
+                api::file::put::put_file
             ],
         )
         .mount("/", routes![redir_api, redir_api_all]);

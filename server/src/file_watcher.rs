@@ -23,7 +23,10 @@ pub fn start_file_watcher(pool: DbPool, mount: String) {
     };
 
     log("Starting file system watcher for automatic sync...");
-    log(&format!("Watching directory: {}", canonical_files_dir.display()));
+    log(&format!(
+        "Watching directory: {}",
+        canonical_files_dir.display()
+    ));
 
     let pool_clone = pool.clone();
 
@@ -131,7 +134,11 @@ fn handle_event(pool: &DbPool, files_dir: &PathBuf, event: &Event) {
     }
 }
 
-fn sync_entry(conn: &r2d2::PooledConnection<DuckdbConnectionManager>, virtual_path: &str, is_dir: bool) {
+fn sync_entry(
+    conn: &r2d2::PooledConnection<DuckdbConnectionManager>,
+    virtual_path: &str,
+    is_dir: bool,
+) {
     let exists: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM files WHERE path = ?",
@@ -183,7 +190,10 @@ fn remove_entry(conn: &r2d2::PooledConnection<DuckdbConnectionManager>, virtual_
             log(&format!("Auto-sync: removed {}", virtual_path));
         }
         Err(e) => {
-            warn(&format!("Auto-sync: failed to remove {}: {}", virtual_path, e));
+            warn(&format!(
+                "Auto-sync: failed to remove {}: {}",
+                virtual_path, e
+            ));
         }
     }
 }
@@ -234,19 +244,31 @@ mod tests {
 
         let virtual_path = "/test-file.txt";
         let exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM files WHERE path = ?", duckdb::params![virtual_path], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(exists, 0);
 
         super::sync_entry(&conn, virtual_path, false);
 
         let exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM files WHERE path = ?", duckdb::params![virtual_path], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(exists, 1);
 
         let perm_exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM file_perms WHERE path = ?", duckdb::params![virtual_path], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM file_perms WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(perm_exists, 1);
     }
@@ -260,7 +282,11 @@ mod tests {
         super::sync_entry(&conn, virtual_path, true);
 
         let r#type: String = conn
-            .query_row("SELECT type FROM files WHERE path = ?", duckdb::params![virtual_path], |row| row.get(0))
+            .query_row(
+                "SELECT type FROM files WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(r#type, "folder");
     }
@@ -274,7 +300,11 @@ mod tests {
         super::sync_entry(&conn, virtual_path, false);
 
         let initial_updated: String = conn
-            .query_row("SELECT updated_at FROM files WHERE path = ?", duckdb::params![virtual_path], |row| row.get(0))
+            .query_row(
+                "SELECT updated_at FROM files WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
             .unwrap();
 
         std::thread::sleep(std::time::Duration::from_millis(10));
@@ -282,13 +312,21 @@ mod tests {
         super::sync_entry(&conn, virtual_path, false);
 
         let new_updated: String = conn
-            .query_row("SELECT updated_at FROM files WHERE path = ?", duckdb::params![virtual_path], |row| row.get(0))
+            .query_row(
+                "SELECT updated_at FROM files WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
             .unwrap();
 
         assert!(new_updated >= initial_updated);
 
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM files WHERE path = ?", duckdb::params![virtual_path], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1);
     }
@@ -304,12 +342,20 @@ mod tests {
         super::remove_entry(&conn, virtual_path);
 
         let file_exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM files WHERE path = ?", duckdb::params![virtual_path], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(file_exists, 0);
 
         let perm_exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM file_perms WHERE path = ?", duckdb::params![virtual_path], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM file_perms WHERE path = ?",
+                duckdb::params![virtual_path],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(perm_exists, 0);
     }
@@ -333,7 +379,11 @@ mod tests {
 
         let conn = pool.get().unwrap();
         let exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM files WHERE path = ?", duckdb::params!["/new-test.txt"], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE path = ?",
+                duckdb::params!["/new-test.txt"],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(exists, 1);
     }
@@ -359,7 +409,11 @@ mod tests {
 
         let conn = pool.get().unwrap();
         let exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM files WHERE path = ?", duckdb::params!["/existing.txt"], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM files WHERE path = ?",
+                duckdb::params!["/existing.txt"],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(exists, 0);
     }
@@ -367,7 +421,10 @@ mod tests {
     #[test]
     fn test_handle_event_ignores_s4_and_backups() {
         let (pool, temp) = test_pool();
-        let files_dir = PathBuf::from(temp.path()).join("files").canonicalize().unwrap();
+        let files_dir = PathBuf::from(temp.path())
+            .join("files")
+            .canonicalize()
+            .unwrap();
 
         let s4_path = files_dir.join(".s4");
         fs::create_dir_all(&s4_path).unwrap();

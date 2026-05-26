@@ -1,4 +1,4 @@
-use crate::logger::{warn, log};
+use crate::logger::{log, warn};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -17,6 +17,8 @@ pub struct Config {
     pub(crate) remote_allow_local: Option<bool>,
     pub(crate) startup_sync: Option<bool>,
     pub(crate) auto_sync: Option<bool>,
+    pub(crate) max_compression_upload: Option<u64>,
+    pub(crate) ignore_errors: Option<bool>,
 }
 
 impl Config {
@@ -72,6 +74,14 @@ impl Config {
         self.auto_sync.unwrap_or(true)
     }
 
+    pub fn max_compression_upload(&self) -> u64 {
+        self.max_compression_upload.unwrap_or(104_857_600)
+    }
+
+    pub fn ignore_errors(&self) -> bool {
+        self.ignore_errors.unwrap_or(false)
+    }
+
     pub fn defaulted() -> Self {
         let mut config = Self::default();
         config.host = Some("127.0.0.1".to_string());
@@ -87,6 +97,8 @@ impl Config {
         config.remote_allow_local = Some(false);
         config.startup_sync = Some(true);
         config.auto_sync = Some(true);
+        config.max_compression_upload = Some(104_857_600);
+        config.ignore_errors = Some(false);
         config
     }
 }
@@ -131,6 +143,8 @@ mod tests {
             remote_allow_local: None,
             startup_sync: None,
             auto_sync: None,
+            max_compression_upload: None,
+            ignore_errors: None,
         };
 
         assert_eq!(config.host(), "127.0.0.1");
@@ -146,5 +160,7 @@ mod tests {
         assert!(!config.remote_allow_local());
         assert!(config.startup_sync());
         assert!(config.auto_sync());
+        assert_eq!(config.max_compression_upload(), 104_857_600);
+        assert!(!config.ignore_errors());
     }
 }
